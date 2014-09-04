@@ -1,0 +1,12 @@
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.next
+release.properties
+.settings
+.project
+.classpath
+pom.xml.versionsBackup
+bin
+gen
+pom.xml.asc

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android" >
+
+    <PreferenceCategory
+        android:key="pref_connection"
+        android:title="@string/pref_connection_title" >
+        <EditTextPreference
+            android:defaultValue="ws://10.10.1.105:8082/ws/"
+            android:key="@string/wsServer_key"
+            android:persistent="true"
+            android:title="@string/wsServer" />
+    </PreferenceCategory>
+</PreferenceScreen>
