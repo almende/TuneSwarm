@@ -5,7 +5,7 @@
         android:key="pref_connection"
         android:title="@string/pref_connection_title" >
         <EditTextPreference
-            android:defaultValue="ws://10.10.1.105:8082/ws/"
+            android:defaultValue="ws://192.168.1.122:8082/ws/"
             android:key="@string/wsServer_key"
             android:persistent="true"
             android:title="@string/wsServer" />

@@ -2,10 +2,12 @@ package com.almende.demo.tuneswarmapp;
 
 import android.annotation.TargetApi;
 import android.app.Activity;
+import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.view.Menu;
+import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.View;
 
@@ -18,6 +20,7 @@ import com.almende.demo.tuneswarmapp.util.SystemUiHider;
  * @see SystemUiHider
  */
 public class PlayScreen extends Activity {
+
 	/**
 	 * Whether or not the system UI should be auto-hidden after
 	 * {@link #AUTO_HIDE_DELAY_MILLIS} milliseconds.
@@ -117,23 +120,45 @@ public class PlayScreen extends Activity {
 		// while interacting with the UI.
 		findViewById(R.id.dummy_button).setOnTouchListener(
 				mDelayHideTouchListener);
-		
+
 	}
 
 	/*
 	 * (non-Javadoc)
-	 * 
 	 * @see android.app.Activity#onCreateOptionsMenu(android.view.Menu)
 	 */
 	@Override
 	public boolean onCreateOptionsMenu(final Menu menu) {
-		
+
 		// Inflate the menu; this adds items to the action bar if it is present.
 		getMenuInflater().inflate(R.menu.tuneswarm_app, menu);
 		return super.onCreateOptionsMenu(menu);
 	}
 	
-	
+	/*
+	 * (non-Javadoc)
+	 * 
+	 * @see android.app.Activity#onOptionsItemSelected(android.view.MenuItem)
+	 */
+	@Override
+	public boolean onOptionsItemSelected(final MenuItem item) {
+		// Handle item selection
+		switch (item.getItemId()) {
+			case R.id.action_settings:
+				try {
+					startActivity(new Intent(this, SettingsActivity.class));
+				} catch (Throwable t) {
+					t.printStackTrace();
+				}
+				return true;
+			case android.R.id.home:
+				getFragmentManager().popBackStack();
+				return true;
+			default:
+				return super.onOptionsItemSelected(item);
+		}
+	}
+
 	@Override
 	protected void onPostCreate(Bundle savedInstanceState) {
 		super.onPostCreate(savedInstanceState);
@@ -141,7 +166,7 @@ public class PlayScreen extends Activity {
 		// Trigger the initial hide() shortly after the activity has been
 		// created, to briefly hint to the user that UI controls
 		// are available.
-		delayedHide(100);
+		delayedHide(500);
 	}
 
 	/**
@@ -157,9 +182,10 @@ public class PlayScreen extends Activity {
 															if (AUTO_HIDE) {
 																delayedHide(AUTO_HIDE_DELAY_MILLIS);
 															}
-															//TODO: check this!
-															return view.performClick();
-															//return false;
+															// TODO: check this!
+															return view
+																	.performClick();
+															// return false;
 														}
 													};
 

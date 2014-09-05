@@ -10,9 +10,14 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.hardware.Sensor;
+import android.hardware.SensorManager;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
+
+import com.almende.demo.tuneswarmapp.util.ShakeSensor;
+import com.almende.demo.tuneswarmapp.util.ShakeSensor.OnShakeListener;
 
 /**
  * The Class EveService.
@@ -25,13 +30,19 @@ public class EveService extends Service {
 	public static final HandlerThread	myThread	= new HandlerThread(
 															EveService.class
 																	.getCanonicalName());
-	
+	static {
+		myThread.setPriority(Thread.MAX_PRIORITY);
+	}
 	/**
 	 * The Constant NEWTASKID.
 	 */
 	public static final int				NEWTASKID	= 0;
 
 	public static final TuneSwarmAgent myAgent = new TuneSwarmAgent();
+	private SensorManager			mSensorManager;
+	private Sensor					mAccelerometer;
+	private ShakeSensor				shakeSensor;
+
 	
 	/*
 	 * (non-Javadoc)
@@ -61,6 +72,10 @@ public class EveService extends Service {
 		noti.flags |= Notification.FLAG_FOREGROUND_SERVICE;
 		
 		notificationManager.notify(NEWTASKID, noti);
+		
+		mSensorManager.registerListener(shakeSensor, mAccelerometer,
+				SensorManager.SENSOR_DELAY_UI);
+
 	}
 	
 	/**
@@ -75,12 +90,31 @@ public class EveService extends Service {
 			@Override
 			public void run() {
 				myAgent.init(ctx);
+				setupShakeListener();
 				setupBaseNotification();
 			}
 		});
 	}
 	
-	
+	private void setupShakeListener() {
+		// ShakeDetector initialization
+				mSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+				mAccelerometer = mSensorManager
+						.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+				shakeSensor = new ShakeSensor();
+				shakeSensor.setOnShakeListener(new OnShakeListener() {
+
+					@Override
+					public void onStartShake() {
+						myAgent.startShake();
+					}
+					@Override
+					public void onStopShake() {
+						myAgent.stopShake();
+					}
+
+				});
+	}
 	/**
 	 * Starts the service.
 	 * 
@@ -111,6 +145,8 @@ public class EveService extends Service {
 	 */
 	@Override
 	public void onDestroy() {
+		mSensorManager.unregisterListener(shakeSensor);
+		
 		super.onDestroy();
 	}
 	
