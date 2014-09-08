@@ -14,8 +14,8 @@ public class ShakeSensor implements SensorEventListener {
 	 * from the Google Play Store and run it to see how
 	 *  many G's it takes to register a shake
 	 */
-	private static final float SHAKE_THRESHOLD_GRAVITY = 2.0F;
-	private static final int SHAKE_SLOP_TIME_MS = 250;
+	public static float SHAKE_THRESHOLD_GRAVITY = 2.0F;
+	public static int SHAKE_SLOP_TIME_MS = 250;
 
 	private OnShakeListener mListener;
 	private static long mShakeTimestamp = Long.MAX_VALUE;

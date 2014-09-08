@@ -2,23 +2,28 @@
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 
-        <parent>
-                <groupId>com.almende.demo</groupId>
-                <artifactId>tuneSwarmParent</artifactId>
-                <version>0.0.1-SNAPSHOT</version>
-                <relativePath>../parent/pom.xml</relativePath>
-        </parent>
+	<parent>
+		<groupId>com.almende.demo</groupId>
+		<artifactId>tuneSwarmParent</artifactId>
+		<version>0.0.1-SNAPSHOT</version>
+		<relativePath>../parent/pom.xml</relativePath>
+	</parent>
 	<artifactId>tuneSwarmConductor</artifactId>
 
 	<name>TuneSwarm Conductor</name>
 	<description>Conductor for the TuneSwarm</description>
-	
+
 	<properties>
 		<maven.shade.version>2.2</maven.shade.version>
 		<maven.jar.version>2.4</maven.jar.version>
 	</properties>
 
 	<dependencies>
+		<dependency>
+			<groupId>com.almende.demo</groupId>
+			<artifactId>tuneSwarmCommon</artifactId>
+			<version>${project.parent.version}</version>
+		</dependency>
 		<dependency>
 			<groupId>com.almende.eve</groupId>
 			<artifactId>eve-agents</artifactId>
@@ -34,9 +39,14 @@
 			<artifactId>eve-transport-ws</artifactId>
 			<version>${eve.version}</version>
 		</dependency>
+		<dependency>
+			<groupId>com.almende.eve</groupId>
+			<artifactId>eve-scheduling-sync</artifactId>
+			<version>${eve.version}</version>
+		</dependency>
 	</dependencies>
-	
-		<build>
+
+	<build>
 		<plugins>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
@@ -68,5 +78,5 @@
 			</plugin>
 		</plugins>
 	</build>
-	
+
 </project>

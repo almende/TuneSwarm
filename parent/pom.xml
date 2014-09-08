@@ -49,6 +49,7 @@
 	</properties>
 
 	<modules>
+		<module>../TuneSwarmCommon</module>
 		<module>../TuneSwarmApp</module>
 		<module>../TuneSwarmConductor</module>
 	</modules>

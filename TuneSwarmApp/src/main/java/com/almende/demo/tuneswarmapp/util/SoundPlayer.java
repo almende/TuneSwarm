@@ -17,7 +17,7 @@ public class SoundPlayer {
 
 	// create an audiotrack object
 	private static final AudioTrack			audioTrack	= new AudioTrack(
-														AudioManager.STREAM_ALARM,
+														AudioManager.STREAM_RING,
 														sr,
 														AudioFormat.CHANNEL_OUT_MONO,
 														AudioFormat.ENCODING_PCM_16BIT,
@@ -35,7 +35,7 @@ public class SoundPlayer {
 			setPriority(Thread.MAX_PRIORITY);
 
 			final short samples[] = new short[buffsize];
-			final int amp = 20000;
+			final int amp = 55000;
 			final double twopi = 8. * Math.atan(1.);
 			double ph = 0.0;
 
@@ -74,5 +74,9 @@ public class SoundPlayer {
 		isRunning[0] = false;
 		audioTrack.pause();
 		audioTrack.flush();
+	}
+
+	public double getFrequency() {
+		return fr;
 	}
 }

@@ -6,12 +6,16 @@ import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.View;
+import android.widget.FrameLayout;
 
 import com.almende.demo.tuneswarmapp.util.SystemUiHider;
+
+import de.greenrobot.event.EventBus;
 
 /**
  * An example full-screen activity that shows and hides the system UI (i.e.
@@ -49,12 +53,26 @@ public class PlayScreen extends Activity {
 	 */
 	private SystemUiHider			mSystemUiHider;
 
+	public void onEventMainThread(final StateEvent event) {
+		if (event.getValue().equals("changeColor")) {
+			final FrameLayout contentView = (FrameLayout) findViewById(R.id.fullscreen_container);
+			if (contentView != null){
+				contentView.setBackgroundColor(Integer.valueOf(event.getId()));
+			} else {
+				Log.w("ColorChanger","Couldn't find fullscreen_container");
+			}
+		}
+	}
+	
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 
 		setContentView(R.layout.activity_play_screen);
 
+		EventBus.getDefault().unregister(this);
+		EventBus.getDefault().register(this);
+		
 		final View controlsView = findViewById(R.id.fullscreen_content_controls);
 		final View contentView = findViewById(R.id.fullscreen_content);
 
@@ -118,8 +136,8 @@ public class PlayScreen extends Activity {
 		// Upon interacting with UI controls, delay any scheduled hide()
 		// operations to prevent the jarring behavior of controls going away
 		// while interacting with the UI.
-		findViewById(R.id.dummy_button).setOnTouchListener(
-				mDelayHideTouchListener);
+//		findViewById(R.id.dummy_button).setOnTouchListener(
+//				mDelayHideTouchListener);
 
 	}
 

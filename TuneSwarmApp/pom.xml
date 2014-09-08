@@ -30,6 +30,11 @@
 
 	<dependencies>
 		<dependency>
+			<groupId>com.almende.demo</groupId>
+			<artifactId>tuneSwarmCommon</artifactId>
+			<version>${project.parent.version}</version>
+		</dependency>
+		<dependency>
 			<groupId>com.almende.eve</groupId>
 			<artifactId>eve-bundle-android-ws</artifactId>
 			<version>${eve.version}</version>
