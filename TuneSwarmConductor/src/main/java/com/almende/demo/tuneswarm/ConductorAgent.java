@@ -38,7 +38,7 @@ public class ConductorAgent extends Agent {
 																		.getName());
 	private static final ConductorAgent				SINGLETON	= new ConductorAgent();
 	private static final Map<Tone, List<ToneAgent>>	agents		= new HashMap<Tone, List<ToneAgent>>();
-	private static final String						HOST		= "10.10.1.105:8082";
+	private static final String						HOST		= "192.168.1.122:8082";
 
 	/**
 	 * The Class ToneAgent.
@@ -106,7 +106,7 @@ public class ConductorAgent extends Agent {
 		config.setScheduler(schedulerConfig);
 
 		setConfig(config);
-		
+
 		final SyncScheduler scheduler = (SyncScheduler) getScheduler();
 		scheduler.setCaller(caller);
 		LOG.warning("Started Conductor at:" + HOST);
@@ -175,11 +175,13 @@ public class ConductorAgent extends Agent {
 		Iterator<TuneDescription> iter = tunes.values().iterator();
 		TuneDescription td = null;
 		while (iter.hasNext()) {
-			if (td == null) {
-				td = iter.next();
-			}
 			boolean progress = false;
 			for (Entry<Tone, TuneDescription> item : plan.entrySet()) {
+				if (iter.hasNext()){
+					td = iter.next();
+				} else {
+					break;
+				}
 				LOG.warning("Merging tones:"
 						+ JOM.getInstance().valueToTree(td.getTones())
 						+ " to plan:" + JOM.getInstance().valueToTree(item));
@@ -190,7 +192,6 @@ public class ConductorAgent extends Agent {
 				}
 			}
 			if (!progress) {
-				LOG.warning("Couldn't play all notes, due to one or more overlapping notes!");
 				break;
 			}
 		}
