@@ -4,6 +4,9 @@
  */
 package com.almende.demo.tuneswarm;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
@@ -16,6 +19,8 @@ import java.util.logging.Logger;
 
 import com.almende.eve.agent.Agent;
 import com.almende.eve.agent.AgentConfig;
+import com.almende.eve.capabilities.Config;
+import com.almende.eve.config.YamlReader;
 import com.almende.eve.scheduling.SyncScheduler;
 import com.almende.eve.scheduling.SyncSchedulerConfig;
 import com.almende.eve.transform.rpc.annotation.Access;
@@ -38,7 +43,8 @@ public class ConductorAgent extends Agent {
 																		.getName());
 	private static final ConductorAgent				SINGLETON	= new ConductorAgent();
 	private static final Map<Tone, List<ToneAgent>>	agents		= new HashMap<Tone, List<ToneAgent>>();
-	private static final String						HOST		= "192.168.1.122:8082";
+	private static final Map<URI, ToneAgent>		agents2		= new HashMap<URI, ToneAgent>();
+	private static Config							config		= null;
 
 	/**
 	 * The Class ToneAgent.
@@ -76,6 +82,11 @@ public class ConductorAgent extends Agent {
 	 * Inits the Conference Cloud Agent.
 	 */
 	public void init() {
+		String host = "192.168.1.122:8082";
+		if (config != null && config.has("host")) {
+			host = config.get("host").asText();
+		}
+
 		final String id = "conductor";
 		final AgentConfig config = new AgentConfig(id);
 
@@ -83,7 +94,7 @@ public class ConductorAgent extends Agent {
 		final WebsocketTransportConfig serverConfig = new WebsocketTransportConfig();
 		serverConfig.setId("conductor");
 		serverConfig.setServer(true);
-		serverConfig.setAddress("ws://" + HOST + "/ws/" + id);
+		serverConfig.setAddress("ws://" + host + "/ws/" + id);
 		serverConfig.setServletLauncher("JettyLauncher");
 		final ObjectNode jettyParms = JOM.createObjectNode();
 		jettyParms.put("port", 8082);
@@ -93,7 +104,7 @@ public class ConductorAgent extends Agent {
 		final HttpTransportConfig debugConfig = new HttpTransportConfig();
 		debugConfig.setId("conductor");
 		debugConfig.setDoAuthentication(false);
-		debugConfig.setServletUrl("http://" + HOST + "/www/");
+		debugConfig.setServletUrl("http://" + host + "/www/");
 		debugConfig
 				.setServletClass("com.almende.eve.transport.http.DebugServlet");
 		debugConfig.setServletLauncher("JettyLauncher");
@@ -109,7 +120,7 @@ public class ConductorAgent extends Agent {
 
 		final SyncScheduler scheduler = (SyncScheduler) getScheduler();
 		scheduler.setCaller(caller);
-		LOG.warning("Started Conductor at:" + HOST);
+		LOG.warning("Started Conductor at:" + host);
 	}
 
 	/**
@@ -129,6 +140,15 @@ public class ConductorAgent extends Agent {
 	 *            the arguments
 	 */
 	public static void main(final String[] args) {
+		if (args.length > 0) {
+			try {
+				config = YamlReader
+						.load(new FileInputStream(new File(args[0])));
+
+			} catch (FileNotFoundException e) {
+				LOG.warning("Couldn't find yaml file:" + args[0]);
+			}
+		}
 		SINGLETON.init();
 	}
 
@@ -140,7 +160,14 @@ public class ConductorAgent extends Agent {
 	 * @return the double
 	 */
 	public double registerAgent(@Sender String senderUrl) {
-
+		final URI address = URI.create(senderUrl);
+		if (agents2.containsKey(address)) {
+			final Tone tone = agents2.get(address).tone;
+			LOG.warning("Re-registering:" + senderUrl + " was already tone:"
+					+ tone);
+			return tone.getFrequency();
+		}
+		// New agent
 		ToneAgent agent = new ToneAgent();
 		agent.address = URI.create(senderUrl);
 		agent.tone = getTone();
@@ -149,6 +176,7 @@ public class ConductorAgent extends Agent {
 			value.add(agent);
 			agents.put(agent.tone, value);
 		}
+		agents2.put(address, agent);
 		LOG.warning("Registering:" + senderUrl + " will be tone:" + agent.tone);
 		return agent.tone.getFrequency();
 	}
@@ -177,7 +205,7 @@ public class ConductorAgent extends Agent {
 		while (iter.hasNext()) {
 			boolean progress = false;
 			for (Entry<Tone, TuneDescription> item : plan.entrySet()) {
-				if (iter.hasNext()){
+				if (iter.hasNext()) {
 					td = iter.next();
 				} else {
 					break;

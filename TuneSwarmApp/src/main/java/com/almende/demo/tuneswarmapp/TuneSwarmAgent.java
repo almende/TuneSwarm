@@ -10,7 +10,6 @@ import org.joda.time.DateTime;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Color;
-import android.media.AudioManager;
 import android.preference.PreferenceManager;
 import android.telephony.TelephonyManager;
 
@@ -45,7 +44,7 @@ public class TuneSwarmAgent extends Agent {
 	private boolean				playOnShake	= true;
 	private boolean				lightOnly	= true;
 	private long				lightPrelay	= 0;
-	private SoundPlayer			player		= new SoundPlayer();
+	private SoundPlayer			player;
 
 	public void configure(@Name("config") ObjectNode config) {
 		if (config.has("playOnShake")) {
@@ -68,6 +67,13 @@ public class TuneSwarmAgent extends Agent {
 			ShakeSensor.SHAKE_THRESHOLD_GRAVITY = config.get(
 					"shake_threshold_g").floatValue();
 		}
+		if (config.has("stream")) {
+			player.switchStream(config.get("stream").asText());
+		}
+		if (config.has("volume")) {
+			player.setVolume(config.get("volume").asDouble());
+		}
+
 	}
 
 	public Long ping() {
@@ -116,7 +122,7 @@ public class TuneSwarmAgent extends Agent {
 			player.setFrequency(tone.getTone().getFrequency());
 		}
 		startLight("Green");
-		schedule("stopLight", null, (int) (tone.getDuration()+lightPrelay));
+		schedule("stopLight", null, (int) (tone.getDuration() + lightPrelay));
 		if (!lightOnly) {
 			schedule("startTone", null, (int) lightPrelay);
 			schedule("stopTone", null, (int) (tone.getDuration() + lightPrelay));
@@ -168,10 +174,7 @@ public class TuneSwarmAgent extends Agent {
 	public void init(Context ctx) {
 		TuneSwarmAgent.ctx = ctx;
 
-		final AudioManager mAudiomgr = (AudioManager) ctx
-				.getSystemService(Context.AUDIO_SERVICE);
-		mAudiomgr.setStreamVolume(AudioManager.STREAM_RING,
-				mAudiomgr.getStreamMaxVolume(AudioManager.STREAM_RING), 0);
+		player = new SoundPlayer(ctx);
 
 		EventBus.getDefault().unregister(this);
 		EventBus.getDefault().register(this);
