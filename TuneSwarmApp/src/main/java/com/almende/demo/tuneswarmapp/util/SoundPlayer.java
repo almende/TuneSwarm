@@ -14,6 +14,8 @@ public class SoundPlayer {
 												AudioFormat.ENCODING_PCM_16BIT);
 	private double			fr			= 440.f;
 	private double			volume		= 0.85;
+	private int				ramp		= 1;
+	private int				rampFactor	= 200;
 
 	// create an audiotrack object
 	private AudioManager	mAudiomgr;
@@ -24,10 +26,13 @@ public class SoundPlayer {
 		mAudiomgr = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
 		mAudiomgr.setStreamVolume(AudioManager.STREAM_RING,
 				mAudiomgr.getStreamMaxVolume(AudioManager.STREAM_RING), 0);
+		mAudiomgr.setSpeakerphoneOn(true);
 
 		audioTrack = new AudioTrack(AudioManager.STREAM_RING, sr,
 				AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT,
 				buffsize, AudioTrack.MODE_STREAM);
+		audioTrack.play();
+
 		isRunning[0] = false;
 		synthesisThread = new Synthesis();
 		synthesisThread.start();
@@ -35,6 +40,7 @@ public class SoundPlayer {
 
 	public void switchStream(final String stream) {
 		stopSound();
+		audioTrack.stop();
 		if ("ring".equals(stream)) {
 			mAudiomgr.setStreamVolume(AudioManager.STREAM_RING,
 					mAudiomgr.getStreamMaxVolume(AudioManager.STREAM_RING), 0);
@@ -51,6 +57,7 @@ public class SoundPlayer {
 					AudioFormat.ENCODING_PCM_16BIT, buffsize,
 					AudioTrack.MODE_STREAM);
 		}
+		audioTrack.play();
 
 	}
 
@@ -64,10 +71,10 @@ public class SoundPlayer {
 			double ph = 0.0;
 
 			while (true) {
-				final int amp = (int) (65000 * volume);
+				final int amp = (int) (Short.MAX_VALUE  * volume);
 				while (isRunning[0]) {
 					for (int i = 0; i < buffsize; i++) {
-						samples[i] = (short) (amp * Math.sin(ph));
+						samples[i] = (short) Math.max(Math.min((amp * Math.sin(ph)),Short.MAX_VALUE),Short.MIN_VALUE);
 						ph += twopi * fr / sr;
 					}
 					audioTrack.write(samples, 0, buffsize);
@@ -89,7 +96,8 @@ public class SoundPlayer {
 	public void startSound() {
 		// start audio
 		isRunning[0] = true;
-		audioTrack.play();
+		audioTrack.flush();
+		ramp = (int) (rampFactor * 65000 * volume);
 		synchronized (sleepLock) {
 			sleepLock.notifyAll();
 		}
@@ -97,11 +105,6 @@ public class SoundPlayer {
 
 	public void stopSound() {
 		isRunning[0] = false;
-		synchronized (sleepLock) {
-			sleepLock.notifyAll();
-		}
-		audioTrack.pause();
-		audioTrack.flush();
 	}
 
 	public double getFrequency() {
@@ -110,5 +113,9 @@ public class SoundPlayer {
 
 	public void setVolume(final double volume) {
 		this.volume = volume;
+	}
+
+	public void setRampFactor(int rampFactor) {
+		this.rampFactor = rampFactor;
 	}
 }

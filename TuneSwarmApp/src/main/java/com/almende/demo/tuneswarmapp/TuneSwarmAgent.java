@@ -2,6 +2,7 @@ package com.almende.demo.tuneswarmapp;
 
 import java.io.IOException;
 import java.net.URI;
+import java.util.Locale;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -10,9 +11,12 @@ import org.joda.time.DateTime;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.net.wifi.WifiInfo;
+import android.net.wifi.WifiManager;
 import android.preference.PreferenceManager;
 import android.telephony.TelephonyManager;
 
+import com.almende.demo.tuneswarm.Tone;
 import com.almende.demo.tuneswarm.ToneDescription;
 import com.almende.demo.tuneswarm.TuneDescription;
 import com.almende.demo.tuneswarmapp.util.ShakeSensor;
@@ -36,15 +40,19 @@ import de.greenrobot.event.EventBus;
 
 @Access(AccessType.PUBLIC)
 public class TuneSwarmAgent extends Agent {
-	private static final Logger	LOG			= Logger.getLogger(TuneSwarmAgent.class
-													.getName());
-	private static final String	BASEURL		= "ws://192.168.1.122:8082/ws/";
-	private URI					cloud		= null;
-	private static Context		ctx			= null;
-	private boolean				playOnShake	= true;
-	private boolean				lightOnly	= true;
-	private long				lightPrelay	= 0;
+	private static final Logger	LOG				= Logger.getLogger(TuneSwarmAgent.class
+														.getName());
+	private static final String	BASEURL			= "ws://192.168.1.122:8082/ws/";
+	private URI					cloud			= null;
+	private static Context		ctx				= null;
+	private boolean				playOnShake		= true;
+	private boolean				lightOnly		= true;
+	private boolean				learnLightPrelay = true;
+	private long				lightPrelay		= 0;
+	private long				maxReactionDelay = 250;
 	private SoundPlayer			player;
+
+	private long				lightOnSince	= -1;
 
 	public void configure(@Name("config") ObjectNode config) {
 		if (config.has("playOnShake")) {
@@ -55,6 +63,12 @@ public class TuneSwarmAgent extends Agent {
 		}
 		if (config.has("lightPrelay")) {
 			lightPrelay = config.get("lightPrelay").asLong();
+		}
+		if (config.has("maxReactionDelay")) {
+			maxReactionDelay = config.get("maxReactionDelay").asLong();
+		}
+		if (config.has("learnLightPrelay")){
+			learnLightPrelay = config.get("learnLightPrelay").asBoolean();
 		}
 		if (config.has("frequency")) {
 			player.setFrequency(config.get("frequency").asDouble());
@@ -73,7 +87,10 @@ public class TuneSwarmAgent extends Agent {
 		if (config.has("volume")) {
 			player.setVolume(config.get("volume").asDouble());
 		}
-
+		if (config.has("ramp")){
+			player.setRampFactor(config.get("ramp").asInt());
+		}
+		EventBus.getDefault().post(new StateEvent(null, "updateInfo"));
 	}
 
 	public Long ping() {
@@ -85,6 +102,7 @@ public class TuneSwarmAgent extends Agent {
 		if (color.equals("Green")) {
 			EventBus.getDefault().post(
 					new StateEvent(Color.GREEN + "", "changeColor"));
+			lightOnSince = getScheduler().now();
 		}
 
 	}
@@ -93,6 +111,7 @@ public class TuneSwarmAgent extends Agent {
 		LOG.severe("Stop light!");
 		EventBus.getDefault().post(
 				new StateEvent(Color.BLUE + "", "changeColor"));
+		lightOnSince = -1;
 	}
 
 	public void startTone() {
@@ -108,6 +127,13 @@ public class TuneSwarmAgent extends Agent {
 	public void startShake() {
 		if (playOnShake) {
 			startTone();
+			if (learnLightPrelay && lightOnSince>0){
+				long delay = getScheduler().now()-lightOnSince;
+				if (delay < maxReactionDelay){
+					lightPrelay = (lightPrelay + delay)/2;
+					EventBus.getDefault().post(new StateEvent(null, "updateInfo"));
+				}
+			}
 		}
 	}
 
@@ -163,7 +189,7 @@ public class TuneSwarmAgent extends Agent {
 				final ObjectNode params = JOM.createObjectNode();
 				params.set("tone", JOM.getInstance().valueToTree(tone));
 				schedule("scheduleTone", params,
-						new DateTime(duedate + tone.getStart()));
+						new DateTime(duedate + tone.getStart() - lightPrelay));
 			}
 		} else {
 			LOG.warning("Tune of the past, or no useful timestamp:" + duedate
@@ -196,16 +222,43 @@ public class TuneSwarmAgent extends Agent {
 		config.setScheduler(schedulerConfig);
 
 		setConfig(config, true);
+		EventBus.getDefault().post(new StateEvent(null, "updateInfo"));
+		
+		schedule("reconnect",JOM.createObjectNode(),DateTime.now());
+	}
 
-		reconnect();
+	private String getIpAddr() {
+		WifiManager wifiManager = (WifiManager) ctx
+				.getSystemService(Context.WIFI_SERVICE);
+		WifiInfo wifiInfo = wifiManager.getConnectionInfo();
+		int ip = wifiInfo.getIpAddress();
+		if (ip == 0) {
+			return null;
+		}
+		String ipString = String.format(Locale.US, "%d.%d.%d.%d", (ip & 0xff),
+				(ip >> 8 & 0xff), (ip >> 16 & 0xff), (ip >> 24 & 0xff));
+
+		return ipString;
 	}
 
 	public void reconnect() {
 
 		final SharedPreferences prefs = PreferenceManager
 				.getDefaultSharedPreferences(ctx);
-		final String baseUrl = prefs.getString(
-				ctx.getString(R.string.wsServer_key), BASEURL);
+		String baseUrl = prefs.getString(ctx.getString(R.string.wsServer_key),
+				BASEURL);
+
+		String ip = getIpAddr();
+		if (ip != null) {
+			if (ip.startsWith("10.10.1.")) {
+				LOG.warning("Defaulting to office base url!");
+				baseUrl = "ws://10.10.1.105:8082/ws/";
+			}
+			if (ip.startsWith("192.168.1.")) {
+				LOG.warning("Defaulting to home base url!");
+				baseUrl = "ws://192.168.1.122:8082/ws/";
+			}
+		}
 
 		System.err.println("Reconnecting to server:" + baseUrl + "conductor");
 		final WebsocketTransportConfig clientConfig = new WebsocketTransportConfig();
@@ -222,6 +275,8 @@ public class TuneSwarmAgent extends Agent {
 						@Override
 						public void onSuccess(Double result) {
 							player.setFrequency(result);
+							EventBus.getDefault().post(new StateEvent(null, "updateInfo"));
+							
 						}
 
 						@Override
@@ -242,11 +297,29 @@ public class TuneSwarmAgent extends Agent {
 		} catch (Exception e) {
 			LOG.log(Level.WARNING, "Couldn't add sync peer", e);
 		}
+		EventBus.getDefault().post(new StateEvent(null, "updateInfo"));
+		
 	}
 
 	public void onEventAsync(final StateEvent event) {
 		if (event.getValue().equals("settingsUpdated")) {
 			reconnect();
 		}
+	}
+
+	private String getTone(double frequency){
+		for (Tone tone :Tone.values()){
+			if (tone.getFrequency() == frequency){
+				return tone.name();
+			}
+		}
+		return "??";
+	}
+	public String getText() {
+		String text="";
+		text+="Tone:"+getTone(player.getFrequency())+"\n";
+		text+="Light delay:"+lightPrelay+" ms\n";
+		text+="SyncOffset:"+(getScheduler().now()-System.currentTimeMillis())+" ms\n";
+		return text;
 	}
 }

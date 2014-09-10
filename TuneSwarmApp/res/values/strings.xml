@@ -2,8 +2,7 @@
 <resources>
 
     <string name="app_name">TuneSwarmApp</string>
-    <string name="dummy_button">Dummy Button</string>
-    <string name="dummy_content">DUMMY\nCONTENT</string>
+    <string name="defaultText"></string>
     <string name="eve_service">Eve Service</string>
     <string name="action_settings">Settings</string>
     <string name="title_settings">Settings</string>

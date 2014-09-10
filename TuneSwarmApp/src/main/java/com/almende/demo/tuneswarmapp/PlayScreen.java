@@ -12,6 +12,7 @@ import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.FrameLayout;
+import android.widget.TextView;
 
 import com.almende.demo.tuneswarmapp.util.SystemUiHider;
 
@@ -61,6 +62,11 @@ public class PlayScreen extends Activity {
 			} else {
 				Log.w("ColorChanger","Couldn't find fullscreen_container");
 			}
+		}
+		if (event.getValue().equals("updateInfo")){
+			//TODO: get agent, update info on screen
+			final TextView text = (TextView) findViewById(R.id.fullscreen_content);
+			text.setText(EveService.myAgent.getText());
 		}
 	}
 	

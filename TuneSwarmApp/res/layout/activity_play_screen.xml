@@ -19,9 +19,9 @@
         android:layout_height="match_parent"
         android:gravity="center"
         android:keepScreenOn="true"
-        android:text="@string/dummy_content"
-        android:textColor="#33b5e5"
-        android:textSize="50sp"
+        android:text="@string/defaultText"
+        android:textColor="#000000"
+        android:textSize="25sp"
         android:textStyle="bold" />
 
     <!--
