@@ -1,28 +1,44 @@
 package com.almende.demo.tuneswarmapp.util;
 
+import java.io.BufferedInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
 import android.content.Context;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTrack;
 
+import com.almende.demo.tuneswarm.Tone;
+
 public class SoundPlayer {
-	private final Object	sleepLock	= new Object();
-	private final boolean[]	isRunning	= new boolean[1];
-	private final int		sr			= 44100;
-	private final int		buffsize	= AudioTrack.getMinBufferSize(sr,
-												AudioFormat.CHANNEL_OUT_MONO,
-												AudioFormat.ENCODING_PCM_16BIT);
-	private double			fr			= 440.f;
-	private double			volume		= 0.85;
-	private int				ramp		= 1;
-	private int				rampFactor	= 200;
+	private static final Logger	LOG				= Logger.getLogger(SoundPlayer.class
+														.getName());
+	private final Object		sleepLock		= new Object();
+	private final boolean[]		isRunning		= new boolean[1];
+	private final int			sr				= 44100;
+	private final int			buffsize		= AudioTrack
+														.getMinBufferSize(
+																sr,
+																AudioFormat.CHANNEL_OUT_MONO,
+																AudioFormat.ENCODING_PCM_16BIT);
+	private double				fr				= 440.f;
+	private double				volume			= 0.95;
+	private final Context		ctx;
 
 	// create an audiotrack object
-	private AudioManager	mAudiomgr;
-	private AudioTrack		audioTrack;
-	private final Thread	synthesisThread;
+	private AudioManager		mAudiomgr;
+	private AudioTrack			audioTrack;
+	private final Thread		synthesisThread;
+
+	private boolean				playAngklung	= true;
+	private InputStream			fileStream		= null;
+	private String				filename		= "";
 
 	public SoundPlayer(final Context ctx) {
+		this.ctx = ctx;
 		mAudiomgr = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
 		mAudiomgr.setStreamVolume(AudioManager.STREAM_RING,
 				mAudiomgr.getStreamMaxVolume(AudioManager.STREAM_RING), 0);
@@ -65,26 +81,66 @@ public class SoundPlayer {
 		@Override
 		public void run() {
 			setPriority(Thread.MAX_PRIORITY);
+			try {
+				final short samples[] = new short[buffsize / 2];
+				final double twopi = 2 * Math.PI;
+				double ph = 0.0;
+				
+				while (true) {
+					while (isRunning[0]) {
+						if (playAngklung) {
+							if (!filename.equals("raw/" + getTone() + ".s16")) {
+								// Open file and read sample
+								filename = "raw/" + getTone() + ".s16";
+								try {
+									fileStream = new BufferedInputStream(ctx
+											.getAssets().open(filename));
+								} catch (IOException e) {
+									LOG.log(Level.WARNING,
+											"couldn't open soundfile", e);
+								}
+							}
+							final byte[] buffer = new byte[buffsize];
+							try {
+								int count = fileStream.read(buffer);
+								for (int i = 0; i < count - 1; i++) {
+									samples[i / 2] = (short) (((buffer[i++]) + (buffer[i] << 8)) * volume);
+								}
+								if (count < buffsize) {
+									// Reached end of the file
+									fileStream = new BufferedInputStream(ctx
+											.getAssets().open(filename));
+									int newcount = fileStream.read(buffer, 0,
+											buffsize - count);
+									for (int i = 0; i < newcount - 1; i++) {
+										samples[(count + i) / 2] = (short) (((buffer[i++]) + (buffer[i] << 8)) * volume);
+									}
+								}
+							} catch (IOException e) {
+								LOG.log(Level.WARNING, "couldn't play sound", e);
+							}
+						} else {
 
-			final short samples[] = new short[buffsize];
-			final double twopi = 8. * Math.atan(1.);
-			double ph = 0.0;
+							final int amp = (int) (Short.MAX_VALUE * volume);
+							for (int i = 0; i < buffsize / 2; i++) {
+								final short sample = (short) Math.max(Math.min(
+										(amp * Math.sin(ph)), Short.MAX_VALUE),
+										Short.MIN_VALUE);
+								samples[i] = sample;
 
-			while (true) {
-				final int amp = (int) (Short.MAX_VALUE  * volume);
-				while (isRunning[0]) {
-					for (int i = 0; i < buffsize; i++) {
-						samples[i] = (short) Math.max(Math.min((amp * Math.sin(ph)),Short.MAX_VALUE),Short.MIN_VALUE);
-						ph += twopi * fr / sr;
+								ph += twopi * fr / sr;
+							}
+						}
+						audioTrack.write(samples, 0, buffsize / 2);
 					}
-					audioTrack.write(samples, 0, buffsize);
+					synchronized (sleepLock) {
+						try {
+							sleepLock.wait();
+						} catch (InterruptedException e) {}
+					}
 				}
-				synchronized (sleepLock) {
-					try {
-						sleepLock.wait();
-					} catch (InterruptedException e) {}
-				}
-
+			} catch (Exception e1) {
+				LOG.log(Level.WARNING, "Exception in synthesis thread", e1);
 			}
 		}
 	};
@@ -97,7 +153,7 @@ public class SoundPlayer {
 		// start audio
 		isRunning[0] = true;
 		audioTrack.flush();
-		ramp = (int) (rampFactor * 65000 * volume);
+		filename = "";
 		synchronized (sleepLock) {
 			sleepLock.notifyAll();
 		}
@@ -111,11 +167,20 @@ public class SoundPlayer {
 		return fr;
 	}
 
+	public String getTone() {
+		for (Tone tone : Tone.values()) {
+			if (tone.getFrequency() == fr) {
+				return tone.name();
+			}
+		}
+		return "??";
+	}
+
 	public void setVolume(final double volume) {
 		this.volume = volume;
 	}
 
-	public void setRampFactor(int rampFactor) {
-		this.rampFactor = rampFactor;
+	public void setPlayAngklung(boolean playAngklung) {
+		this.playAngklung = playAngklung;
 	}
 }
