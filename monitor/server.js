@@ -1,0 +1,62 @@
+var express = require('express');
+var app = express();
+var server = require('http').Server(app);
+var io = require('socket.io')(server);
+
+var NOTES = {
+  C4: 0,
+  D4: 1,
+  E4: 2,
+  F4: 3,
+  G4: 5,
+  A4: 6,
+  B4: 7,
+  C5: 8,
+  D5: 9
+};
+
+// start a server
+var PORT = 3000;
+server.listen(PORT);
+console.log('Server listening on http://localhost:' + PORT);
+
+app.use('/', express.static(__dirname + '/public'));
+app.use('/node_modules', express.static(__dirname + '/node_modules'));
+
+// history with all notes
+var notes = [];
+
+io.on('connection', function (socket) {
+  // emit the servers time, so the client can sync with that
+  socket.emit('time', new Date().toISOString());
+
+  // emit all logs from history
+  notes.forEach(function(note) {
+    socket.emit('note', note);
+  });
+});
+
+function logNote(note) {
+  notes.push(note);
+  console.log(JSON.stringify(note));
+
+  // emit to all connected clients
+  var connections = io.sockets.connected;
+  for (var id in connections) {
+    if (connections.hasOwnProperty(id)) {
+      connections[id].emit('note', note);
+    }
+  }
+}
+
+// emit a random note once a second
+// TODO: replace this with connecting via the websocket to the conductor agent
+//       to listen for real events
+setInterval(function () {
+  var arr = Object.keys(NOTES);
+  var note = arr[Math.floor(Math.random() * arr.length)];
+  var duration = Math.pow(2, Math.round(Math.random() * 4)) * 100;
+  var now = new Date().toISOString();
+
+  logNote({'note': note, duration: duration, start: now});
+}, 1000);

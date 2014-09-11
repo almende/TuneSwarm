@@ -1,0 +1,30 @@
+html, body {
+  font: 11pt verdana;
+}
+
+.vis.timeline .item,
+.vis.timeline .item.selected {
+  background: none;
+  border: 0 solid transparent;
+}
+
+.vis.timeline .item .content {
+  overflow: visible;
+}
+
+.vis.timeline .timeaxis .grid.minor {
+  border: transparent;
+}
+
+#timeline-container {
+  height: 400px;
+}
+
+div.note-container {
+  position: relative;
+}
+
+div.note-container img.note {
+  position: relative;
+  left: 16px; /* align the bulb of the note icon centered */
+}

@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+  <script src="socket.io/socket.io.js"></script>
+  <script src="node_modules/handlebars/dist/handlebars.min.js"></script>
+
+  <link href="node_modules/vis/dist/vis.min.css" rel="stylesheet" type="text/css" />
+  <script src="node_modules/vis/dist/vis.min.js"></script>
+
+  <link href="style.css" rel="stylesheet" type="text/css" />
+  <script src="client.js"></script>
+
+  <script id="note-template" type="text/x-handlebars-template">
+    <div class="note-container">
+      <img class="note" src="img/note-128.png" width="78" height="128" style="bottom: {{height}}px;">
+    </div>
+  </script>
+</head>
+<body>
+
+<h1>TuneSwarm monitor</h1>
+<p>
+  <label for="time">Follow current time:</label>
+  <select id="time">
+    <option value="continuous">Continuously</option>
+    <option value="discrete">Discrete</option>
+    <option value="oscilloscope" selected>Oscilloscope</option>
+    <option value="no">No</option>
+  </select>
+  <input id="fit" type="button" value="Fit" />
+  <input id="now" type="button" value="Now" />
+</p>
+<div id="timeline-container"></div>
+
+</body>
+</html>
