@@ -27,9 +27,12 @@ ws.on('message', function (data, flags) {
   var rpc = JSON.parse(data);
   console.log('received', data);
   conductorProxyAgent.request('monitor', rpc)
-      .then(function (response) {
-        ws.send(JSON.stringify(response));
+      .then(function (result) {
+        ws.send(JSON.stringify({id: rpc.id, result: result, error: null}));
       })
+      .catch(function (err) {
+        ws.send(JSON.stringify({id: rpc.id, result: null, error: err.toString()}));
+      });
 });
 ws.on('error', function (err) {
   console.log('Error: Failed to connect to the conductor agent');

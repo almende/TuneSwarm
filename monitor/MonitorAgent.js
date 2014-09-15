@@ -23,6 +23,7 @@ function MonitorAgent(id, params) {
   this._initServer(params);
 }
 
+// Extend eve.Agent
 MonitorAgent.prototype = Object.create(eve.Agent.prototype);
 MonitorAgent.prototype.constructor = MonitorAgent;
 
@@ -62,7 +63,7 @@ MonitorAgent.prototype._initServer = function (params) {
 
 /**
  * Log a music note
- * @param {note: string, duration: number, start: string} note
+ * @param {{note: string, duration: number, start: string}} note
  */
 MonitorAgent.prototype.onNote = function(note) {
   this.notes.push(note);
