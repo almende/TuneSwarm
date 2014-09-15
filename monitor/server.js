@@ -4,6 +4,8 @@ var app = express();
 var server = require('http').Server(app);
 var io = require('socket.io')(server);
 
+var MAX_HISTORY = 10000;
+
 var NOTES = {
   C4: 0,
   D4: 1,
@@ -41,6 +43,9 @@ io.on('connection', function (socket) {
 function logNote(note) {
   notes.push(note);
   console.log(JSON.stringify(note));
+
+  // remove notes when history gets too large
+  while (notes.length > MAX_HISTORY) notes.shift();
 
   // emit to all connected clients
   var connections = io.sockets.connected;
