@@ -3,7 +3,7 @@ var timeline;
 var moment = vis.moment;
 
 var MAX_NOTE_COUNT = 1000;
-var DELAY = 10; // ms
+var DELAY = 1000; // ms
 var NOTES = {
   C4: 0,
   D4: 1,
@@ -85,15 +85,14 @@ window.addEventListener('load', function () {
   var socket = io.connect(location.href);
   socket.on('note', function (data) {
     console.log(data);
+
+    // add the new note to the dataset
     data.height = NOTES[data.note] * 33 / 2 - 19; // at scale 50%
     data.img = data.duration > 500 ? 'note2.png' : 'note4.png';
     notes.add(data);
 
-    var all = notes.get({
-      order: 'start'
-    });
-
     // remove notes when too many
+    var all = notes.get({order: 'start'});
     if (all.length > MAX_NOTE_COUNT) {
       var old = all.splice(0, all.length - MAX_NOTE_COUNT);
       notes.remove(old);
@@ -101,6 +100,7 @@ window.addEventListener('load', function () {
   });
   socket.on('time', function (time) {
     // sync the visualization with the servers time
+    console.log('Server time:', time);
     timeline.setCurrentTime(time);
   });
 });
