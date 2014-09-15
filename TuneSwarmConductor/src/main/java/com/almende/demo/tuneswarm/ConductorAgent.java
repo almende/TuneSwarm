@@ -4,12 +4,14 @@
  */
 package com.almende.demo.tuneswarm;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -19,8 +21,6 @@ import java.util.logging.Logger;
 
 import com.almende.eve.agent.Agent;
 import com.almende.eve.agent.AgentConfig;
-import com.almende.eve.capabilities.Config;
-import com.almende.eve.config.YamlReader;
 import com.almende.eve.scheduling.SyncScheduler;
 import com.almende.eve.scheduling.SyncSchedulerConfig;
 import com.almende.eve.transform.rpc.annotation.Access;
@@ -44,7 +44,6 @@ public class ConductorAgent extends Agent {
 	private static final ConductorAgent				SINGLETON	= new ConductorAgent();
 	private static final Map<Tone, List<ToneAgent>>	agents		= new HashMap<Tone, List<ToneAgent>>();
 	private static final Map<URI, ToneAgent>		agents2		= new HashMap<URI, ToneAgent>();
-	private static Config							config		= null;
 
 	/**
 	 * The Class ToneAgent.
@@ -78,15 +77,36 @@ public class ConductorAgent extends Agent {
 		return leastMembers.getKey();
 	}
 
+	private String getHostAddress() throws SocketException {
+		Enumeration<NetworkInterface> e = NetworkInterface
+				.getNetworkInterfaces();
+		while (e.hasMoreElements()) {
+			NetworkInterface n = (NetworkInterface) e.nextElement();
+			if (!n.isLoopback() && n.isUp() && !n.isVirtual()) {
+
+				Enumeration<InetAddress> ee = n.getInetAddresses();
+				while (ee.hasMoreElements()) {
+					InetAddress i = (InetAddress) ee.nextElement();
+					if (i instanceof Inet4Address && !i.isLinkLocalAddress() && !i.isMulticastAddress()) {
+						return i.getHostAddress().trim();
+					}
+				}
+			}
+		}
+		return null;
+	}
+
 	/**
 	 * Inits the Conference Cloud Agent.
 	 */
 	public void init() {
-		String host = "192.168.1.122:8082";
-		if (config != null && config.has("host")) {
-			host = config.get("host").asText();
+		String host;
+		try {
+			host = getHostAddress() + ":8082";
+		} catch (SocketException e) {
+			LOG.warning("Couldn't determine ipaddress, defaulting to 10.10.1.105");
+			host = "10.10.1.105:8082";
 		}
-
 		final String id = "conductor";
 		final AgentConfig config = new AgentConfig(id);
 
@@ -140,15 +160,6 @@ public class ConductorAgent extends Agent {
 	 *            the arguments
 	 */
 	public static void main(final String[] args) {
-		if (args.length > 0) {
-			try {
-				config = YamlReader
-						.load(new FileInputStream(new File(args[0])));
-
-			} catch (FileNotFoundException e) {
-				LOG.warning("Couldn't find yaml file:" + args[0]);
-			}
-		}
 		SINGLETON.init();
 	}
 
