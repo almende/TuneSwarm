@@ -12,7 +12,7 @@
 
   <script id="note-template" type="text/x-handlebars-template">
     <div class="note-container">
-      <img class="note" src="img/note-128.png" width="78" height="128" style="bottom: {{height}}px;">
+      <img class="note" src="img/{{img}}" width="45.5" height="133.5" style="bottom: {{height}}px;" title="{{note}}">
     </div>
   </script>
 </head>
@@ -30,7 +30,9 @@
   <input id="fit" type="button" value="Fit" />
   <input id="now" type="button" value="Now" />
 </p>
-<div id="timeline-container"></div>
+<div id="timeline-container">
+  <img id="clef" src="img/clef.png">
+</div>
 
 </body>
 </html>

@@ -2,6 +2,10 @@ html, body {
   font: 11pt verdana;
 }
 
+.vis.timeline.root {
+  border: none;
+}
+
 .vis.timeline .item,
 .vis.timeline .item.selected {
   background: none;
@@ -17,7 +21,19 @@ html, body {
 }
 
 #timeline-container {
-  height: 400px;
+  position: relative;
+  height: 250px;
+  padding-left: 96px;
+
+  background: url(img/stave.png) repeat-x;
+  background-size: 100% 100%;
+}
+
+#clef {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
 }
 
 div.note-container {
@@ -26,5 +42,4 @@ div.note-container {
 
 div.note-container img.note {
   position: relative;
-  left: 16px; /* align the bulb of the note icon centered */
 }

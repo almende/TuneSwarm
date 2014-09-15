@@ -8,11 +8,11 @@ var NOTES = {
   D4: 1,
   E4: 2,
   F4: 3,
-  G4: 5,
-  A4: 6,
-  B4: 7,
-  C5: 8,
-  D5: 9
+  G4: 4,
+  A4: 5,
+  B4: 6,
+  C5: 7,
+  D5: 8
 };
 
 // start a server
@@ -52,11 +52,14 @@ function logNote(note) {
 // emit a random note once a second
 // TODO: replace this with connecting via the websocket to the conductor agent
 //       to listen for real events
+var nr = 0;
+var arr = Object.keys(NOTES);
 setInterval(function () {
-  var arr = Object.keys(NOTES);
-  var note = arr[Math.floor(Math.random() * arr.length)];
-  var duration = Math.pow(2, Math.round(Math.random() * 4)) * 100;
   var now = new Date().toISOString();
+  var duration = Math.pow(2, Math.round(Math.random() * 4)) * 100;
+  //var note = arr[Math.floor(Math.random() * arr.length)];
+  var note = arr[nr];
+  nr = (nr + 1) % 9;
 
   logNote({'note': note, duration: duration, start: now});
 }, 1000);
