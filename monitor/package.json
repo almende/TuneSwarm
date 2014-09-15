@@ -1,0 +1,11 @@
+{
+  "name": "tuneswarm-monitor",
+  "version": "0.0.1",
+  "description": "Web based monitor for events emitted by TuneSwarm agents",
+  "dependencies": {
+    "express": "^4.9.0",
+    "handlebars": "^2.0.0",
+    "socket.io": "^1.1.0",
+    "vis": "^3.4.1"
+  }
+}
