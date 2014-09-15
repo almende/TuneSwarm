@@ -4,13 +4,14 @@ var eve = require('evejs');
 var MonitorAgent = require('./MonitorAgent');
 
 var RECONNECT_DELAY = 10000; // ms
+var PORT = argv.port || 3000;
 var CONDUCTOR_AGENT_URL = argv.conductor || 'ws://localhost:8082/ws/conductor';
 var MONITOR_AGENT_URL = 'monitor';
 
 console.log('conductor agent url:', CONDUCTOR_AGENT_URL);
 console.log('monitor agent url:  ', MONITOR_AGENT_URL);
 
-var monitorAgent = new MonitorAgent(MONITOR_AGENT_URL, {port: 3000});
+var monitorAgent = new MonitorAgent(MONITOR_AGENT_URL, {port: PORT});
 
 // create a sort of a proxy agent for the conductorAgent
 // TODO: replace this with a websocket transport as soon as this is implemented in evejs

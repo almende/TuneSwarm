@@ -18,11 +18,19 @@ To start the monitor:
     Provide a custom url for the conductor agent:
 
         node server.js --conductor ws://localhost:8082/ws/conductor
+    
   
   - `--random`
     The server will generate a random note once a second for simulation and 
     testing purposes.
+
+        node server.js --random
         
+  - `--port NUMBER`
+    Open the web application on a custom port. Default port number is 3000.
+
+        node server.js --port 3000
+
 - Open the interface in the browser:
 
         http://localhost:3000
