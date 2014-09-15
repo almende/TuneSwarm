@@ -88,7 +88,7 @@ window.addEventListener('load', function () {
 
     // add the new note to the dataset
     data.height = NOTES[data.note] * 33 / 2 - 19; // at scale 50%
-    data.img = data.duration > 500 ? 'note2.png' : 'note4.png';
+    data.img = data.duration > 1500 ? 'note1.png' : data.duration > 500 ? 'note2.png' : 'note4.png';
     notes.add(data);
 
     // remove notes when too many
