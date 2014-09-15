@@ -60,7 +60,7 @@ window.addEventListener('load', function () {
         running = true;
         break;
 
-      default: // 'not'
+      default: // 'off'
         running = false;
         // do nothing...
         break;
@@ -70,10 +70,20 @@ window.addEventListener('load', function () {
 
   // bind events to buttons
   document.getElementById('fit').onclick = function () {
-    timeline.fit()
+    if (document.getElementById('time').value == 'off') {
+      timeline.fit()
+    }
+    else {
+      alert('Please set time following "Off"');
+    }
   };
   document.getElementById('now').onclick = function () {
-    timeline.moveTo(timeline.getCurrentTime());
+    if (document.getElementById('time').value == 'off') {
+      timeline.moveTo(timeline.getCurrentTime());
+    }
+    else {
+      alert('Please set time following "Off"');
+    }
   };
   document.getElementById('time').onchange = function () {
     if (!running) {
