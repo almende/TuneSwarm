@@ -1,3 +1,4 @@
+var open = require('open');
 var express = require('express');
 var app = express();
 var server = require('http').Server(app);
@@ -19,6 +20,7 @@ var NOTES = {
 var PORT = 3000;
 server.listen(PORT);
 console.log('Server listening on http://localhost:' + PORT);
+open('http://localhost:' + PORT); // automatically open the web app in the browser
 
 app.use('/', express.static(__dirname + '/public'));
 app.use('/node_modules', express.static(__dirname + '/node_modules'));
