@@ -43,6 +43,8 @@ MonitorAgent.prototype.onNote = function(data) {
     var old = all.splice(0, all.length - MAX_NOTE_COUNT);
     this.notes.remove(old);
   }
+
+  return '';
 };
 
 // enum all used notes

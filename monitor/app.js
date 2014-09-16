@@ -122,7 +122,7 @@ window.addEventListener('load', function () {
 function createConductorAgentProxy() {
   // create a sort of a proxy agent for the conductorAgent
   // TODO: replace this with a websocket transport as soon as this is implemented in evejs
-  var conductorProxyAgent = new eve.Agent(CONDUCTOR_AGENT_URL);
+  var conductorProxyAgent = new eve.Agent('proxy');
   conductorProxyAgent.extend('rpc', []);
   conductorProxyAgent.connect(eve.system.transports.getAll());
 
@@ -140,7 +140,15 @@ function createConductorAgentProxy() {
             ws.send(JSON.stringify({id: rpc.id, result: result, error: null}));
           })
           .catch(function (err) {
-            ws.send(JSON.stringify({id: rpc.id, result: null, error: err.toString()}));
+            console.log('Error', err);
+            ws.send(JSON.stringify({
+                jsonrpc: '2.0',
+                id: rpc.id,
+                error: {
+                  code: -32000,
+                  message: err.message || err.toString()
+                }
+            }));
           });
     };
     ws.onclose = function (err) {
