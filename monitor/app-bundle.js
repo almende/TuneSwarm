@@ -45,7 +45,7 @@ MonitorAgent.prototype.onNote = function(data) {
     this.notes.remove(old);
   }
 
-  return '';
+  return 'Thank you very much';
 };
 
 // enum all used notes
