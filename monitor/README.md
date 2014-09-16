@@ -2,38 +2,33 @@
 
 ## Start
 
-To start the monitor:
+Open the application in your browser:
+
+    ./index.html
+
+To connect to a custom conductor agent (default is `ws://localhost:8082/ws/conductor`):
+
+    ./index.html?conductor=ws://localhost:8082/ws/conductor
+
+To let the application generate random notes:
+
+    ./index.html?random
+
+
+## Build
+
+The web application uses commonjs modules. When changes are made in the code,
+the code must be bundled again before it can be used in the browser.
 
 - First install dependencies (once):
 
         npm install
 
-- Start the server:
+- Bundle the code using browserify
 
-        node server.js
-  
-  Command line parameters:
-  
-  - `--conductor URL`
-    Provide a custom url for the conductor agent:
+        npm run build
 
-        node server.js --conductor ws://localhost:8082/ws/conductor
-    
-  
-  - `--random`
-    The server will generate a random note once a second for simulation and 
-    testing purposes.
-
-        node server.js --random
-        
-  - `--port NUMBER`
-    Open the web application on a custom port. Default port number is 3000.
-
-        node server.js --port 3000
-
-- Open the interface in the browser:
-
-        http://localhost:3000
+  This will generate the file `app-bundle.js`, which is loaded by `app.html`.
 
 
 ## Events

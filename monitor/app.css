@@ -1,3 +1,5 @@
+@import url('node_modules/vis/dist/vis.css');
+
 html, body {
   font: 11pt verdana;
 }
