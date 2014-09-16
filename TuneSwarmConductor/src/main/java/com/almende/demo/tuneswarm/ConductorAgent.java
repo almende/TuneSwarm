@@ -29,7 +29,6 @@ import com.almende.eve.transform.rpc.annotation.Access;
 import com.almende.eve.transform.rpc.annotation.AccessType;
 import com.almende.eve.transform.rpc.annotation.Name;
 import com.almende.eve.transform.rpc.annotation.Namespace;
-import com.almende.eve.transform.rpc.annotation.Optional;
 import com.almende.eve.transform.rpc.annotation.Sender;
 import com.almende.eve.transport.http.HttpTransportConfig;
 import com.almende.eve.transport.ws.WebsocketTransportConfig;
@@ -52,21 +51,16 @@ public class ConductorAgent extends Agent {
 	/**
 	 * On note.
 	 *
-	 * @param timestamp
-	 *            the timestamp
-	 * @param duration
-	 *            the duration
-	 * @param tone
-	 *            the tone
+	 * @param event
+	 *            the event
 	 * @param senderUrl
 	 *            the sender url
 	 */
-	public void onNote(@Name("timestamp") long timestamp,
-			@Name("duration") long duration,
-			@Optional @Name("tone") String tone, @Sender String senderUrl) {
+	public void onNote(@Name("toneEvent") ToneEvent event, @Sender String senderUrl) {
 		final ObjectNode params = JOM.createObjectNode();
-		params.put("start", new DateTime(timestamp).toString());
-		params.put("duration", duration);
+		params.put("start", new DateTime(event.getTimestamp()).toString());
+		params.put("duration", event.getDuration());
+		String tone = event.getTone();
 		if (tone != null) {
 			params.put("note", tone);
 		} else {
@@ -78,6 +72,8 @@ public class ConductorAgent extends Agent {
 			LOG.warning("Monitor not available?");
 		}
 	}
+	
+	
 
 	/**
 	 * The Class ToneAgent.
