@@ -135,20 +135,29 @@ function createConductorAgentProxy() {
     ws.onmessage = function (event) {
       console.log('received', event.data);
       var rpc = JSON.parse(event.data);
+      var id = rpc.id;
       conductorProxyAgent.request('monitor', rpc)
           .then(function (result) {
-            ws.send(JSON.stringify({id: rpc.id, result: result, error: null}));
+            var response = JSON.stringify({
+              jsonrpc: '2.0',
+              id: id,
+              result: result
+            });
+            console.log('sending', response);
+            ws.send(response);
           })
           .catch(function (err) {
+            var response = JSON.stringify({
+              jsonrpc: '2.0',
+              id: id,
+              error: {
+                code: -32000,
+                message: err.message || err.toString()
+              }
+            });
+            console.log('sending', response);
+            ws.send(response);
             console.log('Error', err);
-            ws.send(JSON.stringify({
-                jsonrpc: '2.0',
-                id: rpc.id,
-                error: {
-                  code: -32000,
-                  message: err.message || err.toString()
-                }
-            }));
           });
     };
     ws.onclose = function (err) {
