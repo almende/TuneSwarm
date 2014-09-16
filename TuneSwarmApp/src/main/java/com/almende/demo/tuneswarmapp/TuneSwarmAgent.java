@@ -17,6 +17,7 @@ import android.preference.PreferenceManager;
 import android.telephony.TelephonyManager;
 
 import com.almende.demo.tuneswarm.ToneDescription;
+import com.almende.demo.tuneswarm.ToneEvent;
 import com.almende.demo.tuneswarm.TuneDescription;
 import com.almende.demo.tuneswarmapp.util.ShakeSensor;
 import com.almende.demo.tuneswarmapp.util.SoundPlayer;
@@ -127,19 +128,21 @@ public class TuneSwarmAgent extends Agent {
 		LOG.severe("Stop sound!");
 		player.stopSound();
 		if (sendNoteEvents) {
+			final ToneEvent event = new ToneEvent();
+			event.setDuration( getScheduler().now()-playingSince);
+			event.setTimestamp(playingSince);
+			event.setTone(player.getTone());
+			
 			final ObjectNode params = JOM.createObjectNode();
-			params.put("duration", getScheduler().now()-playingSince);
-			params.put("tone", player.getTone());
-			params.put("timestamp", playingSince);
-			final ObjectNode wrapper = JOM.createObjectNode();
-			wrapper.set("params", params);
-			schedule("sendTone", wrapper, DateTime.now());
+			params.set("toneEvent", JOM.getInstance().valueToTree(event));
+			
+			schedule("sendTone", params, DateTime.now());
 		}
 	}
 
-	public void sendTone(@Name("params") ObjectNode params) {
-		LOG.warning("Sending tone event:");
-		LOG.warning(params.toString());
+	public void sendTone(@Name("toneEvent") ToneEvent event) {
+		final ObjectNode params = JOM.createObjectNode();
+		params.set("toneEvent", JOM.getInstance().valueToTree(event));
 		try {
 			caller.call(cloud, "onNote", params);
 		} catch (IOException e) {
