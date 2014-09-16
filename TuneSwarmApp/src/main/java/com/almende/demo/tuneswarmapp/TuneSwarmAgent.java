@@ -47,11 +47,13 @@ public class TuneSwarmAgent extends Agent {
 	private boolean				playOnShake			= true;
 	private boolean				lightOnly			= true;
 	private boolean				learnLightPrelay	= true;
+	private boolean				sendNoteEvents		= true;
 	private long				lightPrelay			= 0;
 	private long				maxReactionDelay	= 250;
 	private SoundPlayer			player;
 
 	private long				lightOnSince		= -1;
+	private long				playingSince		= -1;
 
 	public void configure(@Name("config") ObjectNode config) {
 		if (config.has("playOnShake")) {
@@ -86,8 +88,11 @@ public class TuneSwarmAgent extends Agent {
 		if (config.has("volume")) {
 			player.setVolume(config.get("volume").asDouble());
 		}
-		if (config.has("playAngklung")){
+		if (config.has("playAngklung")) {
 			player.setPlayAngklung(config.get("playAngklung").asBoolean());
+		}
+		if (config.has("sendNoteEvents")) {
+			sendNoteEvents = config.get("sendNoteEvents").asBoolean();
 		}
 		EventBus.getDefault().post(new StateEvent(null, "updateInfo"));
 	}
@@ -115,11 +120,31 @@ public class TuneSwarmAgent extends Agent {
 	public void startTone() {
 		LOG.severe("Starting sound!");
 		player.startSound();
+		playingSince = getScheduler().now();
 	}
 
 	public void stopTone() {
 		LOG.severe("Stop sound!");
 		player.stopSound();
+		if (sendNoteEvents) {
+			final ObjectNode params = JOM.createObjectNode();
+			params.put("duration", getScheduler().now()-playingSince);
+			params.put("tone", player.getTone());
+			params.put("timestamp", playingSince);
+			final ObjectNode wrapper = JOM.createObjectNode();
+			wrapper.set("params", params);
+			schedule("sendTone", wrapper, DateTime.now());
+		}
+	}
+
+	public void sendTone(@Name("params") ObjectNode params) {
+		LOG.warning("Sending tone event:");
+		LOG.warning(params.toString());
+		try {
+			caller.call(cloud, "onNote", params);
+		} catch (IOException e) {
+			LOG.log(Level.WARNING, "Couldn't send onNote event", e);
+		}
 	}
 
 	public void startShake() {

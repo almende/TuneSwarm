@@ -19,6 +19,8 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.logging.Logger;
 
+import org.joda.time.DateTime;
+
 import com.almende.eve.agent.Agent;
 import com.almende.eve.agent.AgentConfig;
 import com.almende.eve.scheduling.SyncScheduler;
@@ -27,6 +29,7 @@ import com.almende.eve.transform.rpc.annotation.Access;
 import com.almende.eve.transform.rpc.annotation.AccessType;
 import com.almende.eve.transform.rpc.annotation.Name;
 import com.almende.eve.transform.rpc.annotation.Namespace;
+import com.almende.eve.transform.rpc.annotation.Optional;
 import com.almende.eve.transform.rpc.annotation.Sender;
 import com.almende.eve.transport.http.HttpTransportConfig;
 import com.almende.eve.transport.ws.WebsocketTransportConfig;
@@ -44,6 +47,37 @@ public class ConductorAgent extends Agent {
 	private static final ConductorAgent				SINGLETON	= new ConductorAgent();
 	private static final Map<Tone, List<ToneAgent>>	agents		= new HashMap<Tone, List<ToneAgent>>();
 	private static final Map<URI, ToneAgent>		agents2		= new HashMap<URI, ToneAgent>();
+	private static final URI						monitor		= URI.create("wsclient:monitor");
+
+	/**
+	 * On note.
+	 *
+	 * @param timestamp
+	 *            the timestamp
+	 * @param duration
+	 *            the duration
+	 * @param tone
+	 *            the tone
+	 * @param senderUrl
+	 *            the sender url
+	 */
+	public void onNote(@Name("timestamp") long timestamp,
+			@Name("duration") long duration,
+			@Optional @Name("tone") String tone, @Sender String senderUrl) {
+		final ObjectNode params = JOM.createObjectNode();
+		params.put("start", new DateTime(timestamp).toString());
+		params.put("duration", duration);
+		if (tone != null) {
+			params.put("note", tone);
+		} else {
+			params.put("note", agents2.get(senderUrl).tone.toString());
+		}
+		try {
+			caller.call(monitor, "onNote", params);
+		} catch (IOException e) {
+			LOG.warning("Monitor not available?");
+		}
+	}
 
 	/**
 	 * The Class ToneAgent.
@@ -87,7 +121,8 @@ public class ConductorAgent extends Agent {
 				Enumeration<InetAddress> ee = n.getInetAddresses();
 				while (ee.hasMoreElements()) {
 					InetAddress i = (InetAddress) ee.nextElement();
-					if (i instanceof Inet4Address && !i.isLinkLocalAddress() && !i.isMulticastAddress()) {
+					if (i instanceof Inet4Address && !i.isLinkLocalAddress()
+							&& !i.isMulticastAddress()) {
 						return i.getHostAddress().trim();
 					}
 				}
