@@ -15,8 +15,21 @@ window.addEventListener('load', function () {
   console.log('conductor agent url:', CONDUCTOR_AGENT_URL);
   console.log('monitor agent url:  ', MONITOR_AGENT_URL);
 
+  var webSocketTransport = new eve.transport.WebSocketTransport();
   var monitorAgent = new MonitorAgent(MONITOR_AGENT_URL);
-  var conductorProxyAgent = createConductorAgentProxy();
+  var conn = monitorAgent.connect(webSocketTransport, 'monitor');
+
+  // connect immediately to the conductor agent (without sending a message),
+  // so the conductor agent can send messages to the monitor agent
+  conn.connect(CONDUCTOR_AGENT_URL)
+      .then(function () {
+        console.log('Connected to the conductor agent');
+      })
+      .catch(function (err) {
+        console.log('Error: Failed to connect to the conductor agent');
+        console.log(err)
+      });
+
   // create a timeline
   var container = document.getElementById('timeline-container');
   var options = {
@@ -108,7 +121,6 @@ window.addEventListener('load', function () {
 
   // expose properties on window for debugging purposes
   window.monitorAgent = monitorAgent;
-  window.conductorProxyAgent = conductorProxyAgent;
   window.timeline = timeline;
   window.vis = vis;
   window.params = params;
@@ -119,6 +131,7 @@ window.addEventListener('load', function () {
  * TODO: this is redundant as soon as evejs supports websockets
  * @returns {eve.Agent}
  */
+// TODO: cleanup
 function createConductorAgentProxy() {
   // create a sort of a proxy agent for the conductorAgent
   // TODO: replace this with a websocket transport as soon as this is implemented in evejs

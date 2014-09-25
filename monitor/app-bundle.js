@@ -63,7 +63,7 @@ MonitorAgent.prototype.NOTES = {
 
 module.exports = MonitorAgent;
 
-},{"evejs":10,"vis/lib/DataSet":54}],2:[function(require,module,exports){
+},{"evejs":15,"vis/lib/DataSet":65}],2:[function(require,module,exports){
 var eve = require('evejs');
 var vis = require('vis');
 var Handlebars = require('handlebars');
@@ -81,8 +81,21 @@ window.addEventListener('load', function () {
   console.log('conductor agent url:', CONDUCTOR_AGENT_URL);
   console.log('monitor agent url:  ', MONITOR_AGENT_URL);
 
+  var webSocketTransport = new eve.transport.WebSocketTransport();
   var monitorAgent = new MonitorAgent(MONITOR_AGENT_URL);
-  var conductorProxyAgent = createConductorAgentProxy();
+  var conn = monitorAgent.connect(webSocketTransport, 'monitor');
+
+  // connect immediately to the conductor agent (without sending a message),
+  // so the conductor agent can send messages to the monitor agent
+  conn.connect(CONDUCTOR_AGENT_URL)
+      .then(function () {
+        console.log('Connected to the conductor agent');
+      })
+      .catch(function (err) {
+        console.log('Error: Failed to connect to the conductor agent');
+        console.log(err)
+      });
+
   // create a timeline
   var container = document.getElementById('timeline-container');
   var options = {
@@ -174,7 +187,6 @@ window.addEventListener('load', function () {
 
   // expose properties on window for debugging purposes
   window.monitorAgent = monitorAgent;
-  window.conductorProxyAgent = conductorProxyAgent;
   window.timeline = timeline;
   window.vis = vis;
   window.params = params;
@@ -256,7 +268,7 @@ function createConductorAgentProxy() {
   return conductorProxyAgent;
 }
 
-},{"./MonitorAgent":1,"./asset/QueryParams":3,"evejs":10,"handlebars":51,"vis":52}],3:[function(require,module,exports){
+},{"./MonitorAgent":1,"./asset/QueryParams":3,"evejs":15,"handlebars":62,"vis":63}],3:[function(require,module,exports){
 /**
  * @prototype QueryParams
  * This prototype contains methods to manipulate the query parameters of the
@@ -1700,10 +1712,1410 @@ process.chdir = function (dir) {
 };
 
 },{}],10:[function(require,module,exports){
+(function (global){
+/*! http://mths.be/punycode v1.2.4 by @mathias */
+;(function(root) {
+
+	/** Detect free variables */
+	var freeExports = typeof exports == 'object' && exports;
+	var freeModule = typeof module == 'object' && module &&
+		module.exports == freeExports && module;
+	var freeGlobal = typeof global == 'object' && global;
+	if (freeGlobal.global === freeGlobal || freeGlobal.window === freeGlobal) {
+		root = freeGlobal;
+	}
+
+	/**
+	 * The `punycode` object.
+	 * @name punycode
+	 * @type Object
+	 */
+	var punycode,
+
+	/** Highest positive signed 32-bit float value */
+	maxInt = 2147483647, // aka. 0x7FFFFFFF or 2^31-1
+
+	/** Bootstring parameters */
+	base = 36,
+	tMin = 1,
+	tMax = 26,
+	skew = 38,
+	damp = 700,
+	initialBias = 72,
+	initialN = 128, // 0x80
+	delimiter = '-', // '\x2D'
+
+	/** Regular expressions */
+	regexPunycode = /^xn--/,
+	regexNonASCII = /[^ -~]/, // unprintable ASCII chars + non-ASCII chars
+	regexSeparators = /\x2E|\u3002|\uFF0E|\uFF61/g, // RFC 3490 separators
+
+	/** Error messages */
+	errors = {
+		'overflow': 'Overflow: input needs wider integers to process',
+		'not-basic': 'Illegal input >= 0x80 (not a basic code point)',
+		'invalid-input': 'Invalid input'
+	},
+
+	/** Convenience shortcuts */
+	baseMinusTMin = base - tMin,
+	floor = Math.floor,
+	stringFromCharCode = String.fromCharCode,
+
+	/** Temporary variable */
+	key;
+
+	/*--------------------------------------------------------------------------*/
+
+	/**
+	 * A generic error utility function.
+	 * @private
+	 * @param {String} type The error type.
+	 * @returns {Error} Throws a `RangeError` with the applicable error message.
+	 */
+	function error(type) {
+		throw RangeError(errors[type]);
+	}
+
+	/**
+	 * A generic `Array#map` utility function.
+	 * @private
+	 * @param {Array} array The array to iterate over.
+	 * @param {Function} callback The function that gets called for every array
+	 * item.
+	 * @returns {Array} A new array of values returned by the callback function.
+	 */
+	function map(array, fn) {
+		var length = array.length;
+		while (length--) {
+			array[length] = fn(array[length]);
+		}
+		return array;
+	}
+
+	/**
+	 * A simple `Array#map`-like wrapper to work with domain name strings.
+	 * @private
+	 * @param {String} domain The domain name.
+	 * @param {Function} callback The function that gets called for every
+	 * character.
+	 * @returns {Array} A new string of characters returned by the callback
+	 * function.
+	 */
+	function mapDomain(string, fn) {
+		return map(string.split(regexSeparators), fn).join('.');
+	}
+
+	/**
+	 * Creates an array containing the numeric code points of each Unicode
+	 * character in the string. While JavaScript uses UCS-2 internally,
+	 * this function will convert a pair of surrogate halves (each of which
+	 * UCS-2 exposes as separate characters) into a single code point,
+	 * matching UTF-16.
+	 * @see `punycode.ucs2.encode`
+	 * @see <http://mathiasbynens.be/notes/javascript-encoding>
+	 * @memberOf punycode.ucs2
+	 * @name decode
+	 * @param {String} string The Unicode input string (UCS-2).
+	 * @returns {Array} The new array of code points.
+	 */
+	function ucs2decode(string) {
+		var output = [],
+		    counter = 0,
+		    length = string.length,
+		    value,
+		    extra;
+		while (counter < length) {
+			value = string.charCodeAt(counter++);
+			if (value >= 0xD800 && value <= 0xDBFF && counter < length) {
+				// high surrogate, and there is a next character
+				extra = string.charCodeAt(counter++);
+				if ((extra & 0xFC00) == 0xDC00) { // low surrogate
+					output.push(((value & 0x3FF) << 10) + (extra & 0x3FF) + 0x10000);
+				} else {
+					// unmatched surrogate; only append this code unit, in case the next
+					// code unit is the high surrogate of a surrogate pair
+					output.push(value);
+					counter--;
+				}
+			} else {
+				output.push(value);
+			}
+		}
+		return output;
+	}
+
+	/**
+	 * Creates a string based on an array of numeric code points.
+	 * @see `punycode.ucs2.decode`
+	 * @memberOf punycode.ucs2
+	 * @name encode
+	 * @param {Array} codePoints The array of numeric code points.
+	 * @returns {String} The new Unicode string (UCS-2).
+	 */
+	function ucs2encode(array) {
+		return map(array, function(value) {
+			var output = '';
+			if (value > 0xFFFF) {
+				value -= 0x10000;
+				output += stringFromCharCode(value >>> 10 & 0x3FF | 0xD800);
+				value = 0xDC00 | value & 0x3FF;
+			}
+			output += stringFromCharCode(value);
+			return output;
+		}).join('');
+	}
+
+	/**
+	 * Converts a basic code point into a digit/integer.
+	 * @see `digitToBasic()`
+	 * @private
+	 * @param {Number} codePoint The basic numeric code point value.
+	 * @returns {Number} The numeric value of a basic code point (for use in
+	 * representing integers) in the range `0` to `base - 1`, or `base` if
+	 * the code point does not represent a value.
+	 */
+	function basicToDigit(codePoint) {
+		if (codePoint - 48 < 10) {
+			return codePoint - 22;
+		}
+		if (codePoint - 65 < 26) {
+			return codePoint - 65;
+		}
+		if (codePoint - 97 < 26) {
+			return codePoint - 97;
+		}
+		return base;
+	}
+
+	/**
+	 * Converts a digit/integer into a basic code point.
+	 * @see `basicToDigit()`
+	 * @private
+	 * @param {Number} digit The numeric value of a basic code point.
+	 * @returns {Number} The basic code point whose value (when used for
+	 * representing integers) is `digit`, which needs to be in the range
+	 * `0` to `base - 1`. If `flag` is non-zero, the uppercase form is
+	 * used; else, the lowercase form is used. The behavior is undefined
+	 * if `flag` is non-zero and `digit` has no uppercase form.
+	 */
+	function digitToBasic(digit, flag) {
+		//  0..25 map to ASCII a..z or A..Z
+		// 26..35 map to ASCII 0..9
+		return digit + 22 + 75 * (digit < 26) - ((flag != 0) << 5);
+	}
+
+	/**
+	 * Bias adaptation function as per section 3.4 of RFC 3492.
+	 * http://tools.ietf.org/html/rfc3492#section-3.4
+	 * @private
+	 */
+	function adapt(delta, numPoints, firstTime) {
+		var k = 0;
+		delta = firstTime ? floor(delta / damp) : delta >> 1;
+		delta += floor(delta / numPoints);
+		for (/* no initialization */; delta > baseMinusTMin * tMax >> 1; k += base) {
+			delta = floor(delta / baseMinusTMin);
+		}
+		return floor(k + (baseMinusTMin + 1) * delta / (delta + skew));
+	}
+
+	/**
+	 * Converts a Punycode string of ASCII-only symbols to a string of Unicode
+	 * symbols.
+	 * @memberOf punycode
+	 * @param {String} input The Punycode string of ASCII-only symbols.
+	 * @returns {String} The resulting string of Unicode symbols.
+	 */
+	function decode(input) {
+		// Don't use UCS-2
+		var output = [],
+		    inputLength = input.length,
+		    out,
+		    i = 0,
+		    n = initialN,
+		    bias = initialBias,
+		    basic,
+		    j,
+		    index,
+		    oldi,
+		    w,
+		    k,
+		    digit,
+		    t,
+		    /** Cached calculation results */
+		    baseMinusT;
+
+		// Handle the basic code points: let `basic` be the number of input code
+		// points before the last delimiter, or `0` if there is none, then copy
+		// the first basic code points to the output.
+
+		basic = input.lastIndexOf(delimiter);
+		if (basic < 0) {
+			basic = 0;
+		}
+
+		for (j = 0; j < basic; ++j) {
+			// if it's not a basic code point
+			if (input.charCodeAt(j) >= 0x80) {
+				error('not-basic');
+			}
+			output.push(input.charCodeAt(j));
+		}
+
+		// Main decoding loop: start just after the last delimiter if any basic code
+		// points were copied; start at the beginning otherwise.
+
+		for (index = basic > 0 ? basic + 1 : 0; index < inputLength; /* no final expression */) {
+
+			// `index` is the index of the next character to be consumed.
+			// Decode a generalized variable-length integer into `delta`,
+			// which gets added to `i`. The overflow checking is easier
+			// if we increase `i` as we go, then subtract off its starting
+			// value at the end to obtain `delta`.
+			for (oldi = i, w = 1, k = base; /* no condition */; k += base) {
+
+				if (index >= inputLength) {
+					error('invalid-input');
+				}
+
+				digit = basicToDigit(input.charCodeAt(index++));
+
+				if (digit >= base || digit > floor((maxInt - i) / w)) {
+					error('overflow');
+				}
+
+				i += digit * w;
+				t = k <= bias ? tMin : (k >= bias + tMax ? tMax : k - bias);
+
+				if (digit < t) {
+					break;
+				}
+
+				baseMinusT = base - t;
+				if (w > floor(maxInt / baseMinusT)) {
+					error('overflow');
+				}
+
+				w *= baseMinusT;
+
+			}
+
+			out = output.length + 1;
+			bias = adapt(i - oldi, out, oldi == 0);
+
+			// `i` was supposed to wrap around from `out` to `0`,
+			// incrementing `n` each time, so we'll fix that now:
+			if (floor(i / out) > maxInt - n) {
+				error('overflow');
+			}
+
+			n += floor(i / out);
+			i %= out;
+
+			// Insert `n` at position `i` of the output
+			output.splice(i++, 0, n);
+
+		}
+
+		return ucs2encode(output);
+	}
+
+	/**
+	 * Converts a string of Unicode symbols to a Punycode string of ASCII-only
+	 * symbols.
+	 * @memberOf punycode
+	 * @param {String} input The string of Unicode symbols.
+	 * @returns {String} The resulting Punycode string of ASCII-only symbols.
+	 */
+	function encode(input) {
+		var n,
+		    delta,
+		    handledCPCount,
+		    basicLength,
+		    bias,
+		    j,
+		    m,
+		    q,
+		    k,
+		    t,
+		    currentValue,
+		    output = [],
+		    /** `inputLength` will hold the number of code points in `input`. */
+		    inputLength,
+		    /** Cached calculation results */
+		    handledCPCountPlusOne,
+		    baseMinusT,
+		    qMinusT;
+
+		// Convert the input in UCS-2 to Unicode
+		input = ucs2decode(input);
+
+		// Cache the length
+		inputLength = input.length;
+
+		// Initialize the state
+		n = initialN;
+		delta = 0;
+		bias = initialBias;
+
+		// Handle the basic code points
+		for (j = 0; j < inputLength; ++j) {
+			currentValue = input[j];
+			if (currentValue < 0x80) {
+				output.push(stringFromCharCode(currentValue));
+			}
+		}
+
+		handledCPCount = basicLength = output.length;
+
+		// `handledCPCount` is the number of code points that have been handled;
+		// `basicLength` is the number of basic code points.
+
+		// Finish the basic string - if it is not empty - with a delimiter
+		if (basicLength) {
+			output.push(delimiter);
+		}
+
+		// Main encoding loop:
+		while (handledCPCount < inputLength) {
+
+			// All non-basic code points < n have been handled already. Find the next
+			// larger one:
+			for (m = maxInt, j = 0; j < inputLength; ++j) {
+				currentValue = input[j];
+				if (currentValue >= n && currentValue < m) {
+					m = currentValue;
+				}
+			}
+
+			// Increase `delta` enough to advance the decoder's <n,i> state to <m,0>,
+			// but guard against overflow
+			handledCPCountPlusOne = handledCPCount + 1;
+			if (m - n > floor((maxInt - delta) / handledCPCountPlusOne)) {
+				error('overflow');
+			}
+
+			delta += (m - n) * handledCPCountPlusOne;
+			n = m;
+
+			for (j = 0; j < inputLength; ++j) {
+				currentValue = input[j];
+
+				if (currentValue < n && ++delta > maxInt) {
+					error('overflow');
+				}
+
+				if (currentValue == n) {
+					// Represent delta as a generalized variable-length integer
+					for (q = delta, k = base; /* no condition */; k += base) {
+						t = k <= bias ? tMin : (k >= bias + tMax ? tMax : k - bias);
+						if (q < t) {
+							break;
+						}
+						qMinusT = q - t;
+						baseMinusT = base - t;
+						output.push(
+							stringFromCharCode(digitToBasic(t + qMinusT % baseMinusT, 0))
+						);
+						q = floor(qMinusT / baseMinusT);
+					}
+
+					output.push(stringFromCharCode(digitToBasic(q, 0)));
+					bias = adapt(delta, handledCPCountPlusOne, handledCPCount == basicLength);
+					delta = 0;
+					++handledCPCount;
+				}
+			}
+
+			++delta;
+			++n;
+
+		}
+		return output.join('');
+	}
+
+	/**
+	 * Converts a Punycode string representing a domain name to Unicode. Only the
+	 * Punycoded parts of the domain name will be converted, i.e. it doesn't
+	 * matter if you call it on a string that has already been converted to
+	 * Unicode.
+	 * @memberOf punycode
+	 * @param {String} domain The Punycode domain name to convert to Unicode.
+	 * @returns {String} The Unicode representation of the given Punycode
+	 * string.
+	 */
+	function toUnicode(domain) {
+		return mapDomain(domain, function(string) {
+			return regexPunycode.test(string)
+				? decode(string.slice(4).toLowerCase())
+				: string;
+		});
+	}
+
+	/**
+	 * Converts a Unicode string representing a domain name to Punycode. Only the
+	 * non-ASCII parts of the domain name will be converted, i.e. it doesn't
+	 * matter if you call it with a domain that's already in ASCII.
+	 * @memberOf punycode
+	 * @param {String} domain The domain name to convert, as a Unicode string.
+	 * @returns {String} The Punycode representation of the given domain name.
+	 */
+	function toASCII(domain) {
+		return mapDomain(domain, function(string) {
+			return regexNonASCII.test(string)
+				? 'xn--' + encode(string)
+				: string;
+		});
+	}
+
+	/*--------------------------------------------------------------------------*/
+
+	/** Define the public API */
+	punycode = {
+		/**
+		 * A string representing the current Punycode.js version number.
+		 * @memberOf punycode
+		 * @type String
+		 */
+		'version': '1.2.4',
+		/**
+		 * An object of methods to convert from JavaScript's internal character
+		 * representation (UCS-2) to Unicode code points, and back.
+		 * @see <http://mathiasbynens.be/notes/javascript-encoding>
+		 * @memberOf punycode
+		 * @type Object
+		 */
+		'ucs2': {
+			'decode': ucs2decode,
+			'encode': ucs2encode
+		},
+		'decode': decode,
+		'encode': encode,
+		'toASCII': toASCII,
+		'toUnicode': toUnicode
+	};
+
+	/** Expose `punycode` */
+	// Some AMD build optimizers, like r.js, check for specific condition patterns
+	// like the following:
+	if (
+		typeof define == 'function' &&
+		typeof define.amd == 'object' &&
+		define.amd
+	) {
+		define('punycode', function() {
+			return punycode;
+		});
+	} else if (freeExports && !freeExports.nodeType) {
+		if (freeModule) { // in Node.js or RingoJS v0.8.0+
+			freeModule.exports = punycode;
+		} else { // in Narwhal or RingoJS v0.7.0-
+			for (key in punycode) {
+				punycode.hasOwnProperty(key) && (freeExports[key] = punycode[key]);
+			}
+		}
+	} else { // in Rhino or a web browser
+		root.punycode = punycode;
+	}
+
+}(this));
+
+}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{}],11:[function(require,module,exports){
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+'use strict';
+
+// If obj.hasOwnProperty has been overridden, then calling
+// obj.hasOwnProperty(prop) will break.
+// See: https://github.com/joyent/node/issues/1707
+function hasOwnProperty(obj, prop) {
+  return Object.prototype.hasOwnProperty.call(obj, prop);
+}
+
+module.exports = function(qs, sep, eq, options) {
+  sep = sep || '&';
+  eq = eq || '=';
+  var obj = {};
+
+  if (typeof qs !== 'string' || qs.length === 0) {
+    return obj;
+  }
+
+  var regexp = /\+/g;
+  qs = qs.split(sep);
+
+  var maxKeys = 1000;
+  if (options && typeof options.maxKeys === 'number') {
+    maxKeys = options.maxKeys;
+  }
+
+  var len = qs.length;
+  // maxKeys <= 0 means that we should not limit keys count
+  if (maxKeys > 0 && len > maxKeys) {
+    len = maxKeys;
+  }
+
+  for (var i = 0; i < len; ++i) {
+    var x = qs[i].replace(regexp, '%20'),
+        idx = x.indexOf(eq),
+        kstr, vstr, k, v;
+
+    if (idx >= 0) {
+      kstr = x.substr(0, idx);
+      vstr = x.substr(idx + 1);
+    } else {
+      kstr = x;
+      vstr = '';
+    }
+
+    k = decodeURIComponent(kstr);
+    v = decodeURIComponent(vstr);
+
+    if (!hasOwnProperty(obj, k)) {
+      obj[k] = v;
+    } else if (isArray(obj[k])) {
+      obj[k].push(v);
+    } else {
+      obj[k] = [obj[k], v];
+    }
+  }
+
+  return obj;
+};
+
+var isArray = Array.isArray || function (xs) {
+  return Object.prototype.toString.call(xs) === '[object Array]';
+};
+
+},{}],12:[function(require,module,exports){
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+'use strict';
+
+var stringifyPrimitive = function(v) {
+  switch (typeof v) {
+    case 'string':
+      return v;
+
+    case 'boolean':
+      return v ? 'true' : 'false';
+
+    case 'number':
+      return isFinite(v) ? v : '';
+
+    default:
+      return '';
+  }
+};
+
+module.exports = function(obj, sep, eq, name) {
+  sep = sep || '&';
+  eq = eq || '=';
+  if (obj === null) {
+    obj = undefined;
+  }
+
+  if (typeof obj === 'object') {
+    return map(objectKeys(obj), function(k) {
+      var ks = encodeURIComponent(stringifyPrimitive(k)) + eq;
+      if (isArray(obj[k])) {
+        return map(obj[k], function(v) {
+          return ks + encodeURIComponent(stringifyPrimitive(v));
+        }).join(sep);
+      } else {
+        return ks + encodeURIComponent(stringifyPrimitive(obj[k]));
+      }
+    }).join(sep);
+
+  }
+
+  if (!name) return '';
+  return encodeURIComponent(stringifyPrimitive(name)) + eq +
+         encodeURIComponent(stringifyPrimitive(obj));
+};
+
+var isArray = Array.isArray || function (xs) {
+  return Object.prototype.toString.call(xs) === '[object Array]';
+};
+
+function map (xs, f) {
+  if (xs.map) return xs.map(f);
+  var res = [];
+  for (var i = 0; i < xs.length; i++) {
+    res.push(f(xs[i], i));
+  }
+  return res;
+}
+
+var objectKeys = Object.keys || function (obj) {
+  var res = [];
+  for (var key in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) res.push(key);
+  }
+  return res;
+};
+
+},{}],13:[function(require,module,exports){
+'use strict';
+
+exports.decode = exports.parse = require('./decode');
+exports.encode = exports.stringify = require('./encode');
+
+},{"./decode":11,"./encode":12}],14:[function(require,module,exports){
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+var punycode = require('punycode');
+
+exports.parse = urlParse;
+exports.resolve = urlResolve;
+exports.resolveObject = urlResolveObject;
+exports.format = urlFormat;
+
+exports.Url = Url;
+
+function Url() {
+  this.protocol = null;
+  this.slashes = null;
+  this.auth = null;
+  this.host = null;
+  this.port = null;
+  this.hostname = null;
+  this.hash = null;
+  this.search = null;
+  this.query = null;
+  this.pathname = null;
+  this.path = null;
+  this.href = null;
+}
+
+// Reference: RFC 3986, RFC 1808, RFC 2396
+
+// define these here so at least they only have to be
+// compiled once on the first module load.
+var protocolPattern = /^([a-z0-9.+-]+:)/i,
+    portPattern = /:[0-9]*$/,
+
+    // RFC 2396: characters reserved for delimiting URLs.
+    // We actually just auto-escape these.
+    delims = ['<', '>', '"', '`', ' ', '\r', '\n', '\t'],
+
+    // RFC 2396: characters not allowed for various reasons.
+    unwise = ['{', '}', '|', '\\', '^', '`'].concat(delims),
+
+    // Allowed by RFCs, but cause of XSS attacks.  Always escape these.
+    autoEscape = ['\''].concat(unwise),
+    // Characters that are never ever allowed in a hostname.
+    // Note that any invalid chars are also handled, but these
+    // are the ones that are *expected* to be seen, so we fast-path
+    // them.
+    nonHostChars = ['%', '/', '?', ';', '#'].concat(autoEscape),
+    hostEndingChars = ['/', '?', '#'],
+    hostnameMaxLen = 255,
+    hostnamePartPattern = /^[a-z0-9A-Z_-]{0,63}$/,
+    hostnamePartStart = /^([a-z0-9A-Z_-]{0,63})(.*)$/,
+    // protocols that can allow "unsafe" and "unwise" chars.
+    unsafeProtocol = {
+      'javascript': true,
+      'javascript:': true
+    },
+    // protocols that never have a hostname.
+    hostlessProtocol = {
+      'javascript': true,
+      'javascript:': true
+    },
+    // protocols that always contain a // bit.
+    slashedProtocol = {
+      'http': true,
+      'https': true,
+      'ftp': true,
+      'gopher': true,
+      'file': true,
+      'http:': true,
+      'https:': true,
+      'ftp:': true,
+      'gopher:': true,
+      'file:': true
+    },
+    querystring = require('querystring');
+
+function urlParse(url, parseQueryString, slashesDenoteHost) {
+  if (url && isObject(url) && url instanceof Url) return url;
+
+  var u = new Url;
+  u.parse(url, parseQueryString, slashesDenoteHost);
+  return u;
+}
+
+Url.prototype.parse = function(url, parseQueryString, slashesDenoteHost) {
+  if (!isString(url)) {
+    throw new TypeError("Parameter 'url' must be a string, not " + typeof url);
+  }
+
+  var rest = url;
+
+  // trim before proceeding.
+  // This is to support parse stuff like "  http://foo.com  \n"
+  rest = rest.trim();
+
+  var proto = protocolPattern.exec(rest);
+  if (proto) {
+    proto = proto[0];
+    var lowerProto = proto.toLowerCase();
+    this.protocol = lowerProto;
+    rest = rest.substr(proto.length);
+  }
+
+  // figure out if it's got a host
+  // user@server is *always* interpreted as a hostname, and url
+  // resolution will treat //foo/bar as host=foo,path=bar because that's
+  // how the browser resolves relative URLs.
+  if (slashesDenoteHost || proto || rest.match(/^\/\/[^@\/]+@[^@\/]+/)) {
+    var slashes = rest.substr(0, 2) === '//';
+    if (slashes && !(proto && hostlessProtocol[proto])) {
+      rest = rest.substr(2);
+      this.slashes = true;
+    }
+  }
+
+  if (!hostlessProtocol[proto] &&
+      (slashes || (proto && !slashedProtocol[proto]))) {
+
+    // there's a hostname.
+    // the first instance of /, ?, ;, or # ends the host.
+    //
+    // If there is an @ in the hostname, then non-host chars *are* allowed
+    // to the left of the last @ sign, unless some host-ending character
+    // comes *before* the @-sign.
+    // URLs are obnoxious.
+    //
+    // ex:
+    // http://a@b@c/ => user:a@b host:c
+    // http://a@b?@c => user:a host:c path:/?@c
+
+    // v0.12 TODO(isaacs): This is not quite how Chrome does things.
+    // Review our test case against browsers more comprehensively.
+
+    // find the first instance of any hostEndingChars
+    var hostEnd = -1;
+    for (var i = 0; i < hostEndingChars.length; i++) {
+      var hec = rest.indexOf(hostEndingChars[i]);
+      if (hec !== -1 && (hostEnd === -1 || hec < hostEnd))
+        hostEnd = hec;
+    }
+
+    // at this point, either we have an explicit point where the
+    // auth portion cannot go past, or the last @ char is the decider.
+    var auth, atSign;
+    if (hostEnd === -1) {
+      // atSign can be anywhere.
+      atSign = rest.lastIndexOf('@');
+    } else {
+      // atSign must be in auth portion.
+      // http://a@b/c@d => host:b auth:a path:/c@d
+      atSign = rest.lastIndexOf('@', hostEnd);
+    }
+
+    // Now we have a portion which is definitely the auth.
+    // Pull that off.
+    if (atSign !== -1) {
+      auth = rest.slice(0, atSign);
+      rest = rest.slice(atSign + 1);
+      this.auth = decodeURIComponent(auth);
+    }
+
+    // the host is the remaining to the left of the first non-host char
+    hostEnd = -1;
+    for (var i = 0; i < nonHostChars.length; i++) {
+      var hec = rest.indexOf(nonHostChars[i]);
+      if (hec !== -1 && (hostEnd === -1 || hec < hostEnd))
+        hostEnd = hec;
+    }
+    // if we still have not hit it, then the entire thing is a host.
+    if (hostEnd === -1)
+      hostEnd = rest.length;
+
+    this.host = rest.slice(0, hostEnd);
+    rest = rest.slice(hostEnd);
+
+    // pull out port.
+    this.parseHost();
+
+    // we've indicated that there is a hostname,
+    // so even if it's empty, it has to be present.
+    this.hostname = this.hostname || '';
+
+    // if hostname begins with [ and ends with ]
+    // assume that it's an IPv6 address.
+    var ipv6Hostname = this.hostname[0] === '[' &&
+        this.hostname[this.hostname.length - 1] === ']';
+
+    // validate a little.
+    if (!ipv6Hostname) {
+      var hostparts = this.hostname.split(/\./);
+      for (var i = 0, l = hostparts.length; i < l; i++) {
+        var part = hostparts[i];
+        if (!part) continue;
+        if (!part.match(hostnamePartPattern)) {
+          var newpart = '';
+          for (var j = 0, k = part.length; j < k; j++) {
+            if (part.charCodeAt(j) > 127) {
+              // we replace non-ASCII char with a temporary placeholder
+              // we need this to make sure size of hostname is not
+              // broken by replacing non-ASCII by nothing
+              newpart += 'x';
+            } else {
+              newpart += part[j];
+            }
+          }
+          // we test again with ASCII char only
+          if (!newpart.match(hostnamePartPattern)) {
+            var validParts = hostparts.slice(0, i);
+            var notHost = hostparts.slice(i + 1);
+            var bit = part.match(hostnamePartStart);
+            if (bit) {
+              validParts.push(bit[1]);
+              notHost.unshift(bit[2]);
+            }
+            if (notHost.length) {
+              rest = '/' + notHost.join('.') + rest;
+            }
+            this.hostname = validParts.join('.');
+            break;
+          }
+        }
+      }
+    }
+
+    if (this.hostname.length > hostnameMaxLen) {
+      this.hostname = '';
+    } else {
+      // hostnames are always lower case.
+      this.hostname = this.hostname.toLowerCase();
+    }
+
+    if (!ipv6Hostname) {
+      // IDNA Support: Returns a puny coded representation of "domain".
+      // It only converts the part of the domain name that
+      // has non ASCII characters. I.e. it dosent matter if
+      // you call it with a domain that already is in ASCII.
+      var domainArray = this.hostname.split('.');
+      var newOut = [];
+      for (var i = 0; i < domainArray.length; ++i) {
+        var s = domainArray[i];
+        newOut.push(s.match(/[^A-Za-z0-9_-]/) ?
+            'xn--' + punycode.encode(s) : s);
+      }
+      this.hostname = newOut.join('.');
+    }
+
+    var p = this.port ? ':' + this.port : '';
+    var h = this.hostname || '';
+    this.host = h + p;
+    this.href += this.host;
+
+    // strip [ and ] from the hostname
+    // the host field still retains them, though
+    if (ipv6Hostname) {
+      this.hostname = this.hostname.substr(1, this.hostname.length - 2);
+      if (rest[0] !== '/') {
+        rest = '/' + rest;
+      }
+    }
+  }
+
+  // now rest is set to the post-host stuff.
+  // chop off any delim chars.
+  if (!unsafeProtocol[lowerProto]) {
+
+    // First, make 100% sure that any "autoEscape" chars get
+    // escaped, even if encodeURIComponent doesn't think they
+    // need to be.
+    for (var i = 0, l = autoEscape.length; i < l; i++) {
+      var ae = autoEscape[i];
+      var esc = encodeURIComponent(ae);
+      if (esc === ae) {
+        esc = escape(ae);
+      }
+      rest = rest.split(ae).join(esc);
+    }
+  }
+
+
+  // chop off from the tail first.
+  var hash = rest.indexOf('#');
+  if (hash !== -1) {
+    // got a fragment string.
+    this.hash = rest.substr(hash);
+    rest = rest.slice(0, hash);
+  }
+  var qm = rest.indexOf('?');
+  if (qm !== -1) {
+    this.search = rest.substr(qm);
+    this.query = rest.substr(qm + 1);
+    if (parseQueryString) {
+      this.query = querystring.parse(this.query);
+    }
+    rest = rest.slice(0, qm);
+  } else if (parseQueryString) {
+    // no query string, but parseQueryString still requested
+    this.search = '';
+    this.query = {};
+  }
+  if (rest) this.pathname = rest;
+  if (slashedProtocol[lowerProto] &&
+      this.hostname && !this.pathname) {
+    this.pathname = '/';
+  }
+
+  //to support http.request
+  if (this.pathname || this.search) {
+    var p = this.pathname || '';
+    var s = this.search || '';
+    this.path = p + s;
+  }
+
+  // finally, reconstruct the href based on what has been validated.
+  this.href = this.format();
+  return this;
+};
+
+// format a parsed object into a url string
+function urlFormat(obj) {
+  // ensure it's an object, and not a string url.
+  // If it's an obj, this is a no-op.
+  // this way, you can call url_format() on strings
+  // to clean up potentially wonky urls.
+  if (isString(obj)) obj = urlParse(obj);
+  if (!(obj instanceof Url)) return Url.prototype.format.call(obj);
+  return obj.format();
+}
+
+Url.prototype.format = function() {
+  var auth = this.auth || '';
+  if (auth) {
+    auth = encodeURIComponent(auth);
+    auth = auth.replace(/%3A/i, ':');
+    auth += '@';
+  }
+
+  var protocol = this.protocol || '',
+      pathname = this.pathname || '',
+      hash = this.hash || '',
+      host = false,
+      query = '';
+
+  if (this.host) {
+    host = auth + this.host;
+  } else if (this.hostname) {
+    host = auth + (this.hostname.indexOf(':') === -1 ?
+        this.hostname :
+        '[' + this.hostname + ']');
+    if (this.port) {
+      host += ':' + this.port;
+    }
+  }
+
+  if (this.query &&
+      isObject(this.query) &&
+      Object.keys(this.query).length) {
+    query = querystring.stringify(this.query);
+  }
+
+  var search = this.search || (query && ('?' + query)) || '';
+
+  if (protocol && protocol.substr(-1) !== ':') protocol += ':';
+
+  // only the slashedProtocols get the //.  Not mailto:, xmpp:, etc.
+  // unless they had them to begin with.
+  if (this.slashes ||
+      (!protocol || slashedProtocol[protocol]) && host !== false) {
+    host = '//' + (host || '');
+    if (pathname && pathname.charAt(0) !== '/') pathname = '/' + pathname;
+  } else if (!host) {
+    host = '';
+  }
+
+  if (hash && hash.charAt(0) !== '#') hash = '#' + hash;
+  if (search && search.charAt(0) !== '?') search = '?' + search;
+
+  pathname = pathname.replace(/[?#]/g, function(match) {
+    return encodeURIComponent(match);
+  });
+  search = search.replace('#', '%23');
+
+  return protocol + host + pathname + search + hash;
+};
+
+function urlResolve(source, relative) {
+  return urlParse(source, false, true).resolve(relative);
+}
+
+Url.prototype.resolve = function(relative) {
+  return this.resolveObject(urlParse(relative, false, true)).format();
+};
+
+function urlResolveObject(source, relative) {
+  if (!source) return relative;
+  return urlParse(source, false, true).resolveObject(relative);
+}
+
+Url.prototype.resolveObject = function(relative) {
+  if (isString(relative)) {
+    var rel = new Url();
+    rel.parse(relative, false, true);
+    relative = rel;
+  }
+
+  var result = new Url();
+  Object.keys(this).forEach(function(k) {
+    result[k] = this[k];
+  }, this);
+
+  // hash is always overridden, no matter what.
+  // even href="" will remove it.
+  result.hash = relative.hash;
+
+  // if the relative url is empty, then there's nothing left to do here.
+  if (relative.href === '') {
+    result.href = result.format();
+    return result;
+  }
+
+  // hrefs like //foo/bar always cut to the protocol.
+  if (relative.slashes && !relative.protocol) {
+    // take everything except the protocol from relative
+    Object.keys(relative).forEach(function(k) {
+      if (k !== 'protocol')
+        result[k] = relative[k];
+    });
+
+    //urlParse appends trailing / to urls like http://www.example.com
+    if (slashedProtocol[result.protocol] &&
+        result.hostname && !result.pathname) {
+      result.path = result.pathname = '/';
+    }
+
+    result.href = result.format();
+    return result;
+  }
+
+  if (relative.protocol && relative.protocol !== result.protocol) {
+    // if it's a known url protocol, then changing
+    // the protocol does weird things
+    // first, if it's not file:, then we MUST have a host,
+    // and if there was a path
+    // to begin with, then we MUST have a path.
+    // if it is file:, then the host is dropped,
+    // because that's known to be hostless.
+    // anything else is assumed to be absolute.
+    if (!slashedProtocol[relative.protocol]) {
+      Object.keys(relative).forEach(function(k) {
+        result[k] = relative[k];
+      });
+      result.href = result.format();
+      return result;
+    }
+
+    result.protocol = relative.protocol;
+    if (!relative.host && !hostlessProtocol[relative.protocol]) {
+      var relPath = (relative.pathname || '').split('/');
+      while (relPath.length && !(relative.host = relPath.shift()));
+      if (!relative.host) relative.host = '';
+      if (!relative.hostname) relative.hostname = '';
+      if (relPath[0] !== '') relPath.unshift('');
+      if (relPath.length < 2) relPath.unshift('');
+      result.pathname = relPath.join('/');
+    } else {
+      result.pathname = relative.pathname;
+    }
+    result.search = relative.search;
+    result.query = relative.query;
+    result.host = relative.host || '';
+    result.auth = relative.auth;
+    result.hostname = relative.hostname || relative.host;
+    result.port = relative.port;
+    // to support http.request
+    if (result.pathname || result.search) {
+      var p = result.pathname || '';
+      var s = result.search || '';
+      result.path = p + s;
+    }
+    result.slashes = result.slashes || relative.slashes;
+    result.href = result.format();
+    return result;
+  }
+
+  var isSourceAbs = (result.pathname && result.pathname.charAt(0) === '/'),
+      isRelAbs = (
+          relative.host ||
+          relative.pathname && relative.pathname.charAt(0) === '/'
+      ),
+      mustEndAbs = (isRelAbs || isSourceAbs ||
+                    (result.host && relative.pathname)),
+      removeAllDots = mustEndAbs,
+      srcPath = result.pathname && result.pathname.split('/') || [],
+      relPath = relative.pathname && relative.pathname.split('/') || [],
+      psychotic = result.protocol && !slashedProtocol[result.protocol];
+
+  // if the url is a non-slashed url, then relative
+  // links like ../.. should be able
+  // to crawl up to the hostname, as well.  This is strange.
+  // result.protocol has already been set by now.
+  // Later on, put the first path part into the host field.
+  if (psychotic) {
+    result.hostname = '';
+    result.port = null;
+    if (result.host) {
+      if (srcPath[0] === '') srcPath[0] = result.host;
+      else srcPath.unshift(result.host);
+    }
+    result.host = '';
+    if (relative.protocol) {
+      relative.hostname = null;
+      relative.port = null;
+      if (relative.host) {
+        if (relPath[0] === '') relPath[0] = relative.host;
+        else relPath.unshift(relative.host);
+      }
+      relative.host = null;
+    }
+    mustEndAbs = mustEndAbs && (relPath[0] === '' || srcPath[0] === '');
+  }
+
+  if (isRelAbs) {
+    // it's absolute.
+    result.host = (relative.host || relative.host === '') ?
+                  relative.host : result.host;
+    result.hostname = (relative.hostname || relative.hostname === '') ?
+                      relative.hostname : result.hostname;
+    result.search = relative.search;
+    result.query = relative.query;
+    srcPath = relPath;
+    // fall through to the dot-handling below.
+  } else if (relPath.length) {
+    // it's relative
+    // throw away the existing file, and take the new path instead.
+    if (!srcPath) srcPath = [];
+    srcPath.pop();
+    srcPath = srcPath.concat(relPath);
+    result.search = relative.search;
+    result.query = relative.query;
+  } else if (!isNullOrUndefined(relative.search)) {
+    // just pull out the search.
+    // like href='?foo'.
+    // Put this after the other two cases because it simplifies the booleans
+    if (psychotic) {
+      result.hostname = result.host = srcPath.shift();
+      //occationaly the auth can get stuck only in host
+      //this especialy happens in cases like
+      //url.resolveObject('mailto:local1@domain1', 'local2@domain2')
+      var authInHost = result.host && result.host.indexOf('@') > 0 ?
+                       result.host.split('@') : false;
+      if (authInHost) {
+        result.auth = authInHost.shift();
+        result.host = result.hostname = authInHost.shift();
+      }
+    }
+    result.search = relative.search;
+    result.query = relative.query;
+    //to support http.request
+    if (!isNull(result.pathname) || !isNull(result.search)) {
+      result.path = (result.pathname ? result.pathname : '') +
+                    (result.search ? result.search : '');
+    }
+    result.href = result.format();
+    return result;
+  }
+
+  if (!srcPath.length) {
+    // no path at all.  easy.
+    // we've already handled the other stuff above.
+    result.pathname = null;
+    //to support http.request
+    if (result.search) {
+      result.path = '/' + result.search;
+    } else {
+      result.path = null;
+    }
+    result.href = result.format();
+    return result;
+  }
+
+  // if a url ENDs in . or .., then it must get a trailing slash.
+  // however, if it ends in anything else non-slashy,
+  // then it must NOT get a trailing slash.
+  var last = srcPath.slice(-1)[0];
+  var hasTrailingSlash = (
+      (result.host || relative.host) && (last === '.' || last === '..') ||
+      last === '');
+
+  // strip single dots, resolve double dots to parent dir
+  // if the path tries to go above the root, `up` ends up > 0
+  var up = 0;
+  for (var i = srcPath.length; i >= 0; i--) {
+    last = srcPath[i];
+    if (last == '.') {
+      srcPath.splice(i, 1);
+    } else if (last === '..') {
+      srcPath.splice(i, 1);
+      up++;
+    } else if (up) {
+      srcPath.splice(i, 1);
+      up--;
+    }
+  }
+
+  // if the path is allowed to go above the root, restore leading ..s
+  if (!mustEndAbs && !removeAllDots) {
+    for (; up--; up) {
+      srcPath.unshift('..');
+    }
+  }
+
+  if (mustEndAbs && srcPath[0] !== '' &&
+      (!srcPath[0] || srcPath[0].charAt(0) !== '/')) {
+    srcPath.unshift('');
+  }
+
+  if (hasTrailingSlash && (srcPath.join('/').substr(-1) !== '/')) {
+    srcPath.push('');
+  }
+
+  var isAbsolute = srcPath[0] === '' ||
+      (srcPath[0] && srcPath[0].charAt(0) === '/');
+
+  // put the host back
+  if (psychotic) {
+    result.hostname = result.host = isAbsolute ? '' :
+                                    srcPath.length ? srcPath.shift() : '';
+    //occationaly the auth can get stuck only in host
+    //this especialy happens in cases like
+    //url.resolveObject('mailto:local1@domain1', 'local2@domain2')
+    var authInHost = result.host && result.host.indexOf('@') > 0 ?
+                     result.host.split('@') : false;
+    if (authInHost) {
+      result.auth = authInHost.shift();
+      result.host = result.hostname = authInHost.shift();
+    }
+  }
+
+  mustEndAbs = mustEndAbs || (result.host && srcPath.length);
+
+  if (mustEndAbs && !isAbsolute) {
+    srcPath.unshift('');
+  }
+
+  if (!srcPath.length) {
+    result.pathname = null;
+    result.path = null;
+  } else {
+    result.pathname = srcPath.join('/');
+  }
+
+  //to support request.http
+  if (!isNull(result.pathname) || !isNull(result.search)) {
+    result.path = (result.pathname ? result.pathname : '') +
+                  (result.search ? result.search : '');
+  }
+  result.auth = relative.auth || result.auth;
+  result.slashes = result.slashes || relative.slashes;
+  result.href = result.format();
+  return result;
+};
+
+Url.prototype.parseHost = function() {
+  var host = this.host;
+  var port = portPattern.exec(host);
+  if (port) {
+    port = port[0];
+    if (port !== ':') {
+      this.port = port.substr(1);
+    }
+    host = host.substr(0, host.length - port.length);
+  }
+  if (host) this.hostname = host;
+};
+
+function isString(arg) {
+  return typeof arg === "string";
+}
+
+function isObject(arg) {
+  return typeof arg === 'object' && arg !== null;
+}
+
+function isNull(arg) {
+  return arg === null;
+}
+function isNullOrUndefined(arg) {
+  return  arg == null;
+}
+
+},{"punycode":10,"querystring":13}],15:[function(require,module,exports){
 exports.Agent = require('./lib/Agent');
 
 exports.ServiceManager = require('./lib/ServiceManager');
 exports.TransportManager = require('./lib/TransportManager');
+exports.hypertimer = require('hypertimer');
 
 exports.module = {
   BabbleModule: require('./lib/module/BabbleModule'),
@@ -1718,20 +3130,24 @@ exports.transport = {
   AMQPTransport:      require('./lib/transport/amqp/AMQPTransport'),
   DistribusTransport: require('./lib/transport/distribus/DistribusTransport'),
   HTTPTransport:      require('./lib/transport/http/HTTPTransport'),
-  
+  WebSocketTransport: require('./lib/transport/websocket/WebSocketTransport'),
+
   connection: {
     Connection:          require('./lib/transport/Connection'),
     LocalConnection:     require('./lib/transport/local/LocalConnection'),
     PubNubConnection:    require('./lib/transport/pubnub/PubNubConnection'),
     AMQPConnection:      require('./lib/transport/amqp/AMQPConnection'),
     DistribusConnection: require('./lib/transport/distribus/DistribusConnection'),
-    HTTPConnection:      require('./lib/transport/http/HTTPConnection')
+    HTTPConnection:      require('./lib/transport/http/HTTPConnection'),
+    WebSocketConnection: require('./lib/transport/websocket/WebSocketConnection')
   }
 };
 
 exports.system = require('./lib/system');
 
-},{"./lib/Agent":11,"./lib/ServiceManager":12,"./lib/TransportManager":13,"./lib/module/BabbleModule":14,"./lib/module/PatternModule":15,"./lib/module/RequestModule":17,"./lib/system":18,"./lib/transport/Connection":19,"./lib/transport/Transport":20,"./lib/transport/amqp/AMQPConnection":21,"./lib/transport/amqp/AMQPTransport":22,"./lib/transport/distribus/DistribusConnection":23,"./lib/transport/distribus/DistribusTransport":24,"./lib/transport/http/HTTPConnection":25,"./lib/transport/http/HTTPTransport":26,"./lib/transport/local/LocalConnection":27,"./lib/transport/local/LocalTransport":28,"./lib/transport/pubnub/PubNubConnection":29,"./lib/transport/pubnub/PubNubTransport":30}],11:[function(require,module,exports){
+exports.util = require('./lib/util');
+
+},{"./lib/Agent":16,"./lib/ServiceManager":17,"./lib/TransportManager":18,"./lib/module/BabbleModule":19,"./lib/module/PatternModule":20,"./lib/module/RequestModule":22,"./lib/system":23,"./lib/transport/Connection":24,"./lib/transport/Transport":25,"./lib/transport/amqp/AMQPConnection":26,"./lib/transport/amqp/AMQPTransport":27,"./lib/transport/distribus/DistribusConnection":28,"./lib/transport/distribus/DistribusTransport":29,"./lib/transport/http/HTTPConnection":30,"./lib/transport/http/HTTPTransport":31,"./lib/transport/local/LocalConnection":32,"./lib/transport/local/LocalTransport":33,"./lib/transport/pubnub/PubNubConnection":34,"./lib/transport/pubnub/PubNubTransport":35,"./lib/transport/websocket/WebSocketConnection":36,"./lib/transport/websocket/WebSocketTransport":37,"./lib/util":38,"hypertimer":39}],16:[function(require,module,exports){
 'use strict';
 
 var Promise = require('promise');
@@ -1866,7 +3282,7 @@ function _getModuleConstructor(name) {
  *                for sharing an address with remote agents.
  *              - A string "protocol://networkId/agentId". This is a sharable
  *                identifier for an agent.
- * @param {string} message  Message to be send
+ * @param {*} message  Message to be send
  * @return {Promise} Returns a promise which resolves when the message as
  *                   successfully been sent, or rejected when sending the
  *                   message failed
@@ -1876,8 +3292,8 @@ Agent.prototype.send = function(to, message) {
   if (colon !== -1) {
     // to is an url like "protocol://networkId/agentId"
     var url = util.parseUrl(to);
-    if (url.protocol == 'http' || url.protocol == 'https') {
-      return this._sendAsHTTP(to, message);
+    if (url.protocol == 'http' || url.protocol == 'ws' || url.protocol == 'https') { // TODO: ugly fixed listing here...
+      return this._sendByProtocol(url.protocol, to, message);
     }
     else {
       return this._sendByNetworkId(url.domain, url.path, message);
@@ -1894,7 +3310,13 @@ Agent.prototype.send = function(to, message) {
   }
 
   // to is an id like "agentId". Send via the default transport
-  return this.defaultConnection.send(to, message);
+  var conn = this.defaultConnection;
+  if (conn) {
+    return conn.send(to, message);
+  }
+  else {
+    return Promise.reject(new Error('No transport found'));
+  }
 };
 
 /**
@@ -1916,11 +3338,14 @@ Agent.prototype._sendByNetworkId = function(networkId, to, message) {
     }
   }
 
-  throw new Error('No transport found with networkId "' + networkId + '"');
+  return Promise.reject(new Error('No transport found with networkId "' + networkId + '"'));
 };
 
 /**
- * Send a transport to an agent via a HTTPTransport
+ * Send a message by a transport by protocol.
+ * The message will be send via the first found transport having the specified
+ * protocol.
+ * @param {string} protocol     A protocol, for example 'http' or 'ws'
  * @param {string} to           An agents id
  * @param {string} message      Message to be send
  * @return {Promise} Returns a promise which resolves when the message as
@@ -1928,15 +3353,15 @@ Agent.prototype._sendByNetworkId = function(networkId, to, message) {
  *                   message failed
  * @private
  */
-Agent.prototype._sendAsHTTP = function(to, message) {
+Agent.prototype._sendByProtocol = function(protocol, to, message) {
   for (var i = 0; i < this.connections.length; i++) {
     var connection = this.connections[i];
-    if (connection.transport.type == 'http') {
+    if (connection.transport.type == protocol) {
       return connection.send(to, message);
     }
   }
 
-  throw new Error('No HTTPTransport found');
+  return Promise.reject(new Error('No transport found for protocol "' + protocol + '"'));
 };
 
 /**
@@ -1957,7 +3382,7 @@ Agent.prototype._sendByTransportId = function(transportId, to, message) {
     }
   }
 
-  throw new Error('No transport found with id "' + transportId + '"');
+  return Promise.reject(new Error('No transport found with id "' + transportId + '"'));
 };
 
 /**
@@ -2138,13 +3563,26 @@ Agent.prototype._updateReady = function () {
 
 module.exports = Agent;
 
-},{"./module/BabbleModule":14,"./module/PatternModule":15,"./module/RPCModule":16,"./module/RequestModule":17,"./system":18,"./util":31,"node-uuid":32,"promise":34}],12:[function(require,module,exports){
+},{"./module/BabbleModule":19,"./module/PatternModule":20,"./module/RPCModule":21,"./module/RequestModule":22,"./system":23,"./util":38,"node-uuid":42,"promise":44}],17:[function(require,module,exports){
 'use strict';
 
+var seed = require('seed-random');
+var hypertimer = require('hypertimer');
 var TransportManager = require('./TransportManager');
+
+// map with known configuration properties
+var KNOWN_PROPERTIES = {
+  transports: true,
+  timer: true,
+  random: true
+};
 
 function ServiceManager(config) {
   this.transports = new TransportManager();
+
+  this.timer = hypertimer();
+
+  this.random = Math.random;
 
   this.init(config);
 }
@@ -2157,8 +3595,31 @@ function ServiceManager(config) {
 ServiceManager.prototype.init = function (config) {
   this.transports.clear();
 
-  if (config && config.transports) {
-    this.transports.load(config.transports);
+  if (config) {
+    if (config.transports) {
+      this.transports.load(config.transports);
+    }
+
+    if (config.timer) {
+      this.timer.config(config.timer);
+    }
+
+    if (config.random) {
+      if (config.random.deterministic) {
+        var key = config.random.seed || 'random seed';
+        this.random = seed(key, config.random);
+      }
+      else {
+        this.random = Math.random;
+      }
+    }
+
+    for (var prop in config) {
+      if (config.hasOwnProperty(prop) && !KNOWN_PROPERTIES[prop]) {
+        // TODO: should log this warning via a configured logger
+        console.log('WARNING: Unknown configuration option "' + prop + '"')
+      }
+    }
   }
 };
 
@@ -2171,7 +3632,7 @@ ServiceManager.prototype.clear = function () {
 
 module.exports = ServiceManager;
 
-},{"./TransportManager":13}],13:[function(require,module,exports){
+},{"./TransportManager":18,"hypertimer":39,"seed-random":46}],18:[function(require,module,exports){
 'use strict';
 
 var AMQPTransport = require('./transport/amqp/AMQPTransport');
@@ -2179,6 +3640,7 @@ var DistribusTransport = require('./transport/distribus/DistribusTransport');
 var LocalTransport = require('./transport/local/LocalTransport');
 var PubNubTransport = require('./transport/pubnub/PubNubTransport');
 var HTTPTransport = require('./transport/http/HTTPTransport');
+var WebSocketTransport = require('./transport/websocket/WebSocketTransport');
 
 /**
  * A manager for loading and finding transports.
@@ -2195,6 +3657,7 @@ function TransportManager(config) {
   this.registerType(LocalTransport);
   this.registerType(PubNubTransport);
   this.registerType(HTTPTransport);
+  this.registerType(WebSocketTransport);
 
   if (config) {
     this.load(config);
@@ -2349,7 +3812,7 @@ TransportManager.prototype.clear = function () {
 
 module.exports = TransportManager;
 
-},{"./transport/amqp/AMQPTransport":22,"./transport/distribus/DistribusTransport":24,"./transport/http/HTTPTransport":26,"./transport/local/LocalTransport":28,"./transport/pubnub/PubNubTransport":30}],14:[function(require,module,exports){
+},{"./transport/amqp/AMQPTransport":27,"./transport/distribus/DistribusTransport":29,"./transport/http/HTTPTransport":31,"./transport/local/LocalTransport":33,"./transport/pubnub/PubNubTransport":35,"./transport/websocket/WebSocketTransport":37}],19:[function(require,module,exports){
 'use strict';
 
 var babble = require('babble');
@@ -2363,13 +3826,19 @@ var babble = require('babble');
  * @constructor
  */
 function BabbleModule(agent, options) {
-  var receiveOriginal = agent._receive;
-
   // create a new babbler
   var babbler = babble.babbler(agent.id);
+  babbler.connect({
+    connect: function (params) {},
+    disconnect: function(token) {},
+    send: function (to, message) {
+      agent.send(to, message);
+    }
+  });
   this.babbler = babbler;
 
-  // attach receive function to the agent
+  // create a receive function for the agent
+  var receiveOriginal = agent._receive;
   this._receive = function (from, message) {
     babbler._receive(message);
     // TODO: only propagate to receiveOriginal if the message is not handled by the babbler
@@ -2395,7 +3864,7 @@ BabbleModule.prototype.mixin = function () {
 
 module.exports = BabbleModule;
 
-},{"babble":4}],15:[function(require,module,exports){
+},{"babble":4}],20:[function(require,module,exports){
 'use strict';
 
 /**
@@ -2495,7 +3964,7 @@ Pattern.prototype.mixin = function () {
 
 module.exports = Pattern;
 
-},{}],16:[function(require,module,exports){
+},{}],21:[function(require,module,exports){
 'use strict';
 
 var uuid = require('node-uuid');
@@ -2549,15 +4018,11 @@ RPCModule.prototype.request = function (to, message) {
   var me = this;
   return new Promise(function (resolve, reject) {
     // prepare the envelope
-    if (message         === undefined) {reject(new Error('Message is empty.'));}
-    if (typeof message  !=  'object' ) {reject(new Error('Message must be an object.'));}
-    if (message.jsonrpc === undefined) {message.jsonrpc = '2.0';}
+    if (typeof message  !=  'object' ) {reject(new TypeError('Message must be an object'));}
     if (message.jsonrpc !== '2.0'    ) {message.jsonrpc = '2.0';}
-    if (message.method  === undefined) {reject(new Error('Method must be supplied.'));}
+    if (message.id      === undefined) {message.id = uuid.v1();}
+    if (message.method  === undefined) {reject(new Error('Property "method" expected'));}
     if (message.params  === undefined) {message.params = {};}
-
-    // generate an envelope id
-    message.id = uuid.v1();
 
     // add the request to the list with requests in progress
     me.queue[message.id] = {
@@ -2604,27 +4069,28 @@ RPCModule.prototype.receive = function (from, message) {
  */
 RPCModule.prototype._receive = function (from, message) {
   // define structure of return message
-  var returnMessage = {jsonrpc:'2.0', id:message.id, result: null, error:null};
+  var returnMessage = {jsonrpc:'2.0', id:message.id};
 
   // check if this is a request
   if (message.method !== undefined) {
     // check is method is available for this agent
     var method = this.availableFunctions[message.method];
     if (method !== undefined) {
-      returnMessage.result = method.call(this.agent, message.params, from);
+      returnMessage.result = method.call(this.agent, message.params, from) || null;
     }
     else {
       var error = new Error('Cannot find function: ' + message.method);
       returnMessage.error = error.message || error.toString();
     }
-    this.agent.send(from,returnMessage);
+    this.agent.send(from, returnMessage);
   }
-  // check if this is a reponse
-  else if (message.result !== undefined) {
+  // check if this is a response
+  else if (message.result !== undefined || message.error !== undefined) {
     var request = this.queue[message.id];
     if (request !== undefined) {
       // if an error is defined, reject promise
-      if (message.error !== null) {
+      if (message.error != undefined) { // null or undefined
+        // FIXME: returned error should be an object {code: number, message: string}
         request.reject(new Error(message.error));
       }
       else {
@@ -2636,7 +4102,8 @@ RPCModule.prototype._receive = function (from, message) {
     // send error back to sender.
     var error = new Error('No method or result defined. Message:' + JSON.stringify(message));
     returnMessage.error = error.message || error.toString();
-    this.agent.send(from,returnMessage);
+    // FIXME: returned error should be an object {code: number, message: string}
+    this.agent.send(from, returnMessage);
   }
 };
 
@@ -2653,7 +4120,7 @@ RPCModule.prototype.mixin = function () {
 };
 
 module.exports = RPCModule;
-},{"node-uuid":32,"promise":34}],17:[function(require,module,exports){
+},{"node-uuid":42,"promise":44}],22:[function(require,module,exports){
 'use strict';
 
 var uuid = require('node-uuid');
@@ -2783,7 +4250,7 @@ Request.prototype.mixin = function () {
 
 module.exports = Request;
 
-},{"../util":31,"node-uuid":32,"promise":34}],18:[function(require,module,exports){
+},{"../util":38,"node-uuid":42,"promise":44}],23:[function(require,module,exports){
 'use strict';
 
 var ServiceManager = require('./ServiceManager');
@@ -2795,7 +4262,7 @@ system.transports.add(new LocalTransport());
 
 module.exports = system;
 
-},{"./ServiceManager":12,"./transport/local/LocalTransport":28}],19:[function(require,module,exports){
+},{"./ServiceManager":17,"./transport/local/LocalTransport":33}],24:[function(require,module,exports){
 'use strict';
 
 var Promise = require('promise');
@@ -2832,7 +4299,7 @@ Connection.prototype.close = function () {
 
 module.exports = Connection;
 
-},{"promise":34}],20:[function(require,module,exports){
+},{"promise":44}],25:[function(require,module,exports){
 'use strict';
 
 /**
@@ -2866,7 +4333,7 @@ Transport.prototype.close = function() {
 
 module.exports = Transport;
 
-},{}],21:[function(require,module,exports){
+},{}],26:[function(require,module,exports){
 'use strict';
 
 var Connection = require('../Connection');
@@ -2910,7 +4377,7 @@ AMQPConnection.prototype.close = function () {
 
 module.exports = AMQPConnection;
 
-},{"../Connection":19}],22:[function(require,module,exports){
+},{"../Connection":24}],27:[function(require,module,exports){
 'use strict';
 
 var Promise = require('promise');
@@ -3064,7 +4531,7 @@ AMQPTransport.prototype.close = function() {
 
 module.exports = AMQPTransport;
 
-},{"./../Transport":20,"./AMQPConnection":21,"amqp":4,"promise":34}],23:[function(require,module,exports){
+},{"./../Transport":25,"./AMQPConnection":26,"amqp":4,"promise":44}],28:[function(require,module,exports){
 'use strict';
 
 var Promise = require('promise');
@@ -3107,7 +4574,7 @@ DistribusConnection.prototype.close = function () {
 
 module.exports = DistribusConnection;
 
-},{"../Connection":19,"promise":34}],24:[function(require,module,exports){
+},{"../Connection":24,"promise":44}],29:[function(require,module,exports){
 'use strict';
 
 var distribus = require('distribus');
@@ -3155,7 +4622,7 @@ DistribusTransport.prototype.close = function() {
 
 module.exports = DistribusTransport;
 
-},{"./../Transport":20,"./DistribusConnection":23,"distribus":4}],25:[function(require,module,exports){
+},{"./../Transport":25,"./DistribusConnection":28,"distribus":4}],30:[function(require,module,exports){
 'use strict';
 
 var Promise = require('promise');
@@ -3190,9 +4657,9 @@ function HTTPConnection(transport, id, receive) {
 HTTPConnection.prototype.send = function (to, message) {
   var fromURL = this.transport.url.replace(':id', this.id);
 
-  var isURL = to.indexOf('://');
+  var isURL = to.indexOf('://') !== -1;
   var toURL;
-  if (isURL != -1) {
+  if (isURL) {
     toURL = to;
   }
   else {
@@ -3200,7 +4667,7 @@ HTTPConnection.prototype.send = function (to, message) {
       toURL = this.transport.remoteUrl.replace(':id', to);
     }
     else {
-      console.log("ERROR: no remote URL specified. Cannot send over HTTP.", to);
+      console.log('ERROR: no remote URL specified. Cannot send over HTTP.', to);
     }
   }
 
@@ -3216,7 +4683,7 @@ HTTPConnection.prototype.close = function () {
 
 module.exports = HTTPConnection;
 
-},{"../Connection":19,"promise":34}],26:[function(require,module,exports){
+},{"../Connection":24,"promise":44}],31:[function(require,module,exports){
 'use strict';
 
 var http = require('http');
@@ -3229,9 +4696,9 @@ var HTTPConnection = require('./HTTPConnection');
  *
  * Supported Options:
  *
- * {Number}  config.port | Port to listen on.
- * {String}  config.path | Path, with or without leading and trailing slash (/)
- * {Boolean} config.localIfAvailable | if the agentId exists locally, use local transport. (local)
+ * {Number}  config.port              Port to listen on.
+ * {String}  config.path              Path, with or without leading and trailing slash (/)
+ * {Boolean} config.localShortcut     If the agentId exists locally, use local transport. (local)
  *
  * Address: http://127.0.0.1:PORTNUMBER/PATH
  */
@@ -3244,15 +4711,15 @@ function HTTPTransport(config) {
 
   this.url = config.url;
   this.remoteUrl = config.remoteUrl;
-  this.localShortcut = config.localShortcut || true;
+  this.localShortcut = (config && config.localShortcut === false) ? false : true;
 
-  this.httpTimeout = 1000; // 1 second
-  this.regexHosts = new RegExp(/[http]{4}s?:\/\/([a-z\-\.A-Z0-9]*):?([0-9]*)(\/[a-z\/:A-Z0-9._\-% \\\(\)\*\+\.\^\$]*)/);
+  this.httpTimeout = 1000; // 1 second // TODO: make httpTimeout customizable, set to 10 sec by default?
+  this.regexHosts = /[http]{4}s?:\/\/([a-z\-\.A-Z0-9]*):?([0-9]*)(\/[a-z\/:A-Z0-9._\-% \\\(\)\*\+\.\^\$]*)/;
   this.urlHostData = this.regexHosts.exec(this.url);
 
   this.regexPath = this.getRegEx(this.urlHostData[3]);
   this.port = config.port || this.urlHostData[2] || 3000;
-  this.path = this.urlHostData[3].replace(":id","");
+  this.path = this.urlHostData[3].replace(':id', '');
 }
 
 HTTPTransport.prototype = new Transport();
@@ -3265,9 +4732,8 @@ HTTPTransport.prototype.getRegEx = function(url) {
 /**
  * Connect an agent
  * @param {String} id
- * @param {Function} onMessage            Invoked as onMessage(from, message)
- * @return {Promise.<Transport, Error>}  Returns a promise which resolves when
- *                                        connected.
+ * @param {Function} receive  Invoked as receive(from, message)
+ * @return {HTTPConnection}   Returns a connection.
  */
 HTTPTransport.prototype.connect = function(id, receive) {
   if (this.server === undefined) {
@@ -3290,14 +4756,14 @@ HTTPTransport.prototype.send = function(from, to, message) {
     var fromRegexpCheck = me.regexPath.exec(from);
     var fromAgentId = fromRegexpCheck[1];
 
-    // check for local shortcut possibililty
+    // check for local shortcut possibility
     if (me.localShortcut == true) {
       var toRegexpCheck = me.regexPath.exec(to);
       var toAgentId = toRegexpCheck[1];
       var toPath = hostData[3].replace(toAgentId,"");
 
       // check if the "to" address is on the same URL, port and path as the "from"
-      if ((hostData[1] == "127.0.0.1"       && hostData[2] == me.urlHostData[2] && toPath == me.path) ||
+      if ((hostData[1] == '127.0.0.1'       && hostData[2] == me.urlHostData[2] && toPath == me.path) ||
           (me.urlHostData[1] == hostData[1] && hostData[2] == me.urlHostData[2] && toPath == me.path)) {
         // by definition true but check anyway
         if (me.agents[toAgentId] !== undefined) {
@@ -3309,7 +4775,7 @@ HTTPTransport.prototype.send = function(from, to, message) {
     }
 
     // stringify the message. If the message is an object, it can have an ID so it may be part of a req/rep.
-    if (typeof message == "object") {
+    if (typeof message == 'object') {
       message = JSON.stringify(message);
 
       // check if the send is a reply to an outstanding request and if so, deliver
@@ -3340,7 +4806,7 @@ HTTPTransport.prototype.send = function(from, to, message) {
       res.on('data', function (response) {
         var parsedResponse;
         try {parsedResponse = JSON.parse(response);} catch (err) {parsedResponse = response;}
-        if (typeof parsedResponse == "object") {
+        if (typeof parsedResponse == 'object') {
           if (parsedResponse.__httpError__ !== undefined) {
             reject(new Error(parsedResponse.__httpError__));
             return;
@@ -3410,7 +4876,7 @@ HTTPTransport.prototype.processRequest = function(request, response) {
 
       var callback = me.agents[agentId];
       if (callback === undefined) {
-        var error = new Error("Agent: '" + agentId + "' does not exist.");
+        var error = new Error('Agent: "' + agentId + '" does not exist.');
         response.end(JSON.stringify({__httpError__:error.message || error.toString()}));
       }
       else {
@@ -3459,10 +4925,9 @@ HTTPTransport.prototype.initiateServer = function() {
       }
     });
 
-    var me = this;
-    this.server.on("error", function(err) {
-      if (err.code == "EADDRINUSE") {
-        throw new Error("ERROR: Could not start HTTP server. Port " + me.port + " is occupied.");
+    this.server.on('error', function(err) {
+      if (err.code == 'EADDRINUSE') {
+        throw new Error('ERROR: Could not start HTTP server. Port ' + me.port + ' is occupied.');
       }
       else {
         throw new Error(err);
@@ -3498,7 +4963,7 @@ HTTPTransport.prototype.close = function() {
 module.exports = HTTPTransport;
 
 
-},{"./../Transport":20,"./HTTPConnection":25,"http":4,"promise":34}],27:[function(require,module,exports){
+},{"./../Transport":25,"./HTTPConnection":30,"http":4,"promise":44}],32:[function(require,module,exports){
 'use strict';
 
 var Promise = require('promise');
@@ -3549,7 +5014,7 @@ LocalConnection.prototype.close = function () {
 
 module.exports = LocalConnection;
 
-},{"../Connection":19,"promise":34}],28:[function(require,module,exports){
+},{"../Connection":24,"promise":44}],33:[function(require,module,exports){
 'use strict';
 
 var Transport = require('./../Transport');
@@ -3592,7 +5057,7 @@ LocalTransport.prototype.close = function() {
 
 module.exports = LocalTransport;
 
-},{"./../Transport":20,"./LocalConnection":27}],29:[function(require,module,exports){
+},{"./../Transport":25,"./LocalConnection":32}],34:[function(require,module,exports){
 'use strict';
 
 var Promise = require('promise');
@@ -3651,7 +5116,7 @@ PubNubConnection.prototype.close = function () {
 
 module.exports = PubNubConnection;
 
-},{"../Connection":19,"promise":34}],30:[function(require,module,exports){
+},{"../Connection":24,"promise":44}],35:[function(require,module,exports){
 'use strict';
 
 var Transport = require('./../Transport');
@@ -3714,7 +5179,393 @@ function PUBNUB() {
 
 module.exports = PubNubTransport;
 
-},{"./../Transport":20,"./PubNubConnection":29,"pubnub":4}],31:[function(require,module,exports){
+},{"./../Transport":25,"./PubNubConnection":34,"pubnub":4}],36:[function(require,module,exports){
+'use strict';
+
+var uuid = require('node-uuid');
+var Promise = require('promise');
+var WebSocket = (typeof window !== 'undefined' && typeof window.WebSocket !== 'undefined') ?
+    window.WebSocket :
+    require('ws');
+
+var util = require('../../util');
+var Connection = require('../Connection');
+
+
+/**
+ * A websocket connection.
+ * @param {WebSocketTransport} transport
+ * @param {string | number | null} url  The url of the agent. The url must match
+ *                                      the url of the WebSocket server.
+ *                                      If url is null, a UUID id is generated as url.
+ * @param {function} receive
+ * @constructor
+ */
+function WebSocketConnection(transport, url, receive) {
+  this.transport = transport;
+  this.url = url ? util.normalizeURL(url) : uuid.v4();
+  this.receive = receive;
+
+  this.sockets = {};
+
+  // ready state
+  this.ready = Promise.resolve(this);
+}
+
+/**
+ * Send a message to an agent.
+ * @param {string} to   The WebSocket url of the receiver
+ * @param {*} message
+ * @return {Promise} Returns a promise which resolves when the message is sent,
+ *                   and rejects when sending the message failed
+ */
+WebSocketConnection.prototype.send = function (to, message) {
+  //console.log('send', this.url, to, message); // TODO: cleanup
+
+  // deliver locally when possible
+  if (this.transport.localShortcut) {
+    var agent = this.transport.agents[to];
+    if (agent) {
+      try {
+        agent.receive(this.url, message);
+        return Promise.resolve();
+      }
+      catch (err) {
+        return Promise.reject(err);
+      }
+    }
+  }
+
+  // get or create a connection
+  var conn = this.sockets[to];
+  if (conn) {
+    try {
+      if (conn.readyState == conn.CONNECTING) {
+        // the connection is still opening
+        return new Promise(function (resolve, reject) {
+          conn.onopen.callback.push(function () {
+            conn.send(JSON.stringify(message));
+            resolve();
+          })
+        });
+      }
+      else if (conn.readyState == conn.OPEN) {
+        conn.send(JSON.stringify(message));
+        return Promise.resolve();
+      }
+      else {
+        // remove the connection
+        conn = null;
+      }
+    }
+    catch (err) {
+      return Promise.reject(err);
+    }
+  }
+
+  if (!conn) {
+    // try to open a connection
+    var me = this;
+    return new Promise(function (resolve, reject) {
+      me._connect(to, function (conn) {
+        conn.send(JSON.stringify(message));
+        resolve();
+      }, function (err) {
+        reject(new Error('Failed to connect to agent "' + to + '"'));
+      });
+    })
+  }
+};
+
+/**
+ * Open a websocket connection to an other agent. No messages are sent.
+ * @param {string} to  Url of the remote agent.
+ * @returns {Promise.<WebSocketConnection, Error>}
+ *              Returns a promise which resolves when the connection is
+ *              established and rejects in case of an error.
+ */
+WebSocketConnection.prototype.connect = function (to) {
+  var me = this;
+  return new Promise(function (resolve, reject) {
+    me._connect(to, function () {
+      resolve(me);
+    }, reject);
+  });
+};
+
+/**
+ * Open a websocket connection
+ * @param {String} to   Url of the remote agent
+ * @param {function} callback
+ * @param {function} errback
+ * @returns {WebSocket}
+ * @private
+ */
+WebSocketConnection.prototype._connect = function (to, callback, errback) {
+  var me = this;
+
+  var conn = new WebSocket(to + '?id=' + this.url);
+
+  // register the new socket
+  me.sockets[to] = conn;
+
+  conn.onopen = function () {
+    conn.onopen.callbacks.forEach(function (cb) {
+      cb(conn);
+    });
+    conn.onopen.callbacks = [];
+  };
+  conn.onopen.callbacks = [callback];
+
+  conn.onmessage = function (event) {
+    me.receive(to, JSON.parse(event.data));
+  };
+
+  conn.onclose = function () {
+    delete me.sockets[to];
+    //console.log('Connection closed');
+    // TODO: implement auto reconnect
+  };
+
+  conn.onerror = function (err) {
+    delete me.sockets[to];
+    //console.log('Error: ' + err);
+    // TODO: implement auto reconnect
+    errback(err);
+  };
+
+  return conn;
+};
+
+/**
+ * Register a websocket connection
+ * @param {String} from       Url of the remote agent
+ * @param {WebSocket} conn    WebSocket connection
+ * @returns {WebSocket}       Returns the websocket itself
+ * @private
+ */
+WebSocketConnection.prototype._onConnection = function (from, conn) {
+  var me = this;
+
+  conn.onmessage = function (event) {
+    me.receive(from, JSON.parse(event.data));
+  };
+
+  conn.onclose = function () {
+    // remove this connection from the sockets list
+    delete me.sockets[from];
+  };
+
+  conn.onerror = function (err) {
+    // TODO: what to do with errors?
+    delete me.sockets[from];
+  };
+
+  if (this.sockets[from]) {
+    // there is already a connection open with remote agent
+    // TODO: what to do with overwriting existing sockets?
+    this.sockets[from].close();
+  }
+
+  // register new connection
+  this.sockets[from] = conn;
+
+  return conn;
+};
+
+/**
+ * Get a list with all open sockets
+ * @return {String[]} Returns all open sockets
+ */
+WebSocketConnection.prototype.list = function () {
+  return Object.keys(this.sockets);
+};
+
+/**
+ * Close the connection. All open sockets will be closed and the agent will
+ * be unregistered from the WebSocketTransport.
+ */
+WebSocketConnection.prototype.close = function () {
+  // close all connections
+  for (var id in this.sockets) {
+    if (this.sockets.hasOwnProperty(id)) {
+      this.sockets[id].close();
+    }
+  }
+  this.sockets = {};
+
+  delete this.transport.agents[this.url];
+};
+
+module.exports = WebSocketConnection;
+
+},{"../../util":38,"../Connection":24,"node-uuid":42,"promise":44,"ws":4}],37:[function(require,module,exports){
+'use strict';
+
+var urlModule = require('url');
+var uuid = require('node-uuid');
+var Promise = require('promise');
+var WebSocketServer = require('ws').Server;
+
+var util = require('../../util');
+var Transport = require('../Transport');
+var WebSocketConnection = require('./WebSocketConnection');
+
+/**
+ * Create a web socket transport.
+ * @param {Object} config         Config can contain the following properties:
+ *                                - `id: string`. Optional
+ *                                - `default: boolean`. Optional
+ *                                - `url: string`. Optional. If provided,
+ *                                  A WebSocket server is started on given
+ *                                  url.
+ *                                - `localShortcut: boolean`. Optional. If true
+ *                                  (default), messages to local agents are not
+ *                                  send via WebSocket but delivered immediately
+ * @constructor
+ */
+function WebSocketTransport(config) {
+  this.id = config && config.id || null;
+  this.networkId = this.id || null;
+  this['default'] = config && config['default'] || false;
+  this.localShortcut = (config && config.localShortcut === false) ? false : true;
+
+  this.url = config && config.url || null;
+  this.server = null;
+
+  if (this.url != null) {
+    var urlParts = urlModule.parse(this.url);
+
+    if (urlParts.protocol != 'ws:') throw new Error('Invalid protocol, "ws:" expected');
+    if (this.url.indexOf(':id') == -1) throw new Error('":id" placeholder missing in url');
+
+    this.address = urlParts.protocol + '//' + urlParts.host; // the url without path, for example 'ws://localhost:3000'
+    this.ready = this._initServer(this.url);
+  }
+  else {
+    this.address = null;
+    this.ready = Promise.resolve(this);
+  }
+
+  this.agents = {}; // WebSocketConnections of all registered agents. The keys are the urls of the agents
+}
+
+WebSocketTransport.prototype = new Transport();
+
+WebSocketTransport.prototype.type = 'ws';
+
+/**
+ * Build an url for given id. Example:
+ *   var url = getUrl('agent1'); // 'ws://localhost:3000/agents/agent1'
+ * @param {String} id
+ * @return {String} Returns the url, or returns null when no url placeholder
+ *                  is defined.
+ */
+WebSocketTransport.prototype.getUrl = function (id) {
+  return this.url ? this.url.replace(':id', id) : null;
+};
+
+/**
+ * Initialize a server on given url
+ * @param {String} url    For example 'http://localhost:3000'
+ * @return {Promise} Returns a promise which resolves when the server is up
+ *                   and running
+ * @private
+ */
+WebSocketTransport.prototype._initServer = function (url) {
+  var urlParts = urlModule.parse(url);
+  var port = urlParts.port || 80;
+
+  var me = this;
+  return new Promise(function (resolve, reject) {
+    me.server = new WebSocketServer({port: port}, function () {
+      resolve(me);
+    });
+
+    me.server.on('connection', me._onConnection.bind(me));
+
+    me.server.on('error', function (err) {
+      reject(err)
+    });
+  })
+};
+
+/**
+ * Handle a new connection. The connection is added to the addressed agent.
+ * @param {WebSocket} conn
+ * @private
+ */
+WebSocketTransport.prototype._onConnection = function (conn) {
+  var url = conn.upgradeReq.url;
+  var urlParts = urlModule.parse(url, true);
+  var toPath = urlParts.pathname;
+  var to = util.normalizeURL(this.address + toPath);
+
+  // read sender id from query parameters or generate a random uuid
+  var queryParams = urlParts.query;
+  var from = queryParams.id || uuid.v4();
+  // TODO: make a config option to allow/disallow anonymous connections?
+  //console.log('onConnection, to=', to, ', from=', from, ', agents:', Object.keys(this.agents)); // TODO: cleanup
+
+  var agent = this.agents[to];
+  if (agent) {
+    agent._onConnection(from, conn);
+  }
+  else {
+    // reject the connection
+    // conn.send('Error: Agent with id "' + to + '" not found'); // TODO: can we send back a message before closing?
+    conn.close();
+  }
+};
+
+/**
+ * Connect an agent
+ * @param {string} id     The id or url of the agent. In case of an
+ *                        url, this url should match the url of the
+ *                        WebSocket server.
+ * @param {Function} receive                  Invoked as receive(from, message)
+ * @return {WebSocketConnection} Returns a promise which resolves when
+ *                                                connected.
+ */
+WebSocketTransport.prototype.connect = function(id, receive) {
+  var isURL = (id.indexOf('://') !== -1);
+
+  // FIXME: it's confusing right now what the final url will be based on the provided id...
+  var url = isURL ? id : (this.getUrl(id) || id);
+  if (url) url = util.normalizeURL(url);
+
+  // register the agents receive function
+  if (this.agents[url]) {
+    throw new Error('Agent with id ' + this.id + ' already exists');
+  }
+
+  var conn = new WebSocketConnection(this, url, receive);
+  this.agents[conn.url] = conn; // use conn.url, url can be changed when it was null
+
+  return conn;
+};
+
+/**
+ * Close the transport. Removes all agent connections.
+ */
+WebSocketTransport.prototype.close = function() {
+  // close all connections
+  for (var id in this.agents) {
+    if (this.agents.hasOwnProperty(id)) {
+      this.agents[id].close();
+    }
+  }
+  this.agents = {};
+
+  // close the server
+  if (this.server) {
+    this.server.close();
+  }
+};
+
+module.exports = WebSocketTransport;
+
+},{"../../util":38,"../Transport":25,"./WebSocketConnection":36,"node-uuid":42,"promise":44,"url":14,"ws":4}],38:[function(require,module,exports){
 'use strict';
 
 /**
@@ -3752,7 +5603,591 @@ exports.parseUrl = function (url) {
   return null;
 };
 
-},{}],32:[function(require,module,exports){
+/**
+ * Test whether a value is a UUID
+ * @param {string} value
+ * @returns {boolean} Returns true when value is a uuid
+ */
+exports.isUUID = function (value) {
+  return /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/.test(value);
+};
+
+/**
+ * Normalize a url. Removes trailing slash
+ * @param {string} url
+ * @return {string} Returns the normalized url
+ */
+exports.normalizeURL = function (url) {
+  if (url[url.length - 1] == '/') {
+    return url.substring(0, url.length - 1);
+  }
+  else {
+    return url;
+  }
+};
+
+},{}],39:[function(require,module,exports){
+module.exports = require('./lib/hypertimer');
+
+},{"./lib/hypertimer":40}],40:[function(require,module,exports){
+var util = require('./util');
+
+// enum for type of timeout
+var TYPE = {
+  TIMEOUT: 0,
+  INTERVAL: 1,
+  TRIGGER: 2
+};
+
+var DISCRETE = 'discrete';
+
+/**
+ * Create a new hypertimer
+ * @param {Object} [options]  The following options are available:
+ *                            rate: number | 'discrete'
+ *                                        The rate of speed of hyper time with
+ *                                        respect to real-time in milliseconds
+ *                                        per millisecond. Rate must be a
+ *                                        positive number, or 'discrete' to
+ *                                        run in discrete time (jumping from
+ *                                        event to event). By default, rate is 1.
+ *                            deterministic: boolean
+ *                                        If true (default), simultaneous events
+ *                                        are executed in a deterministic order.
+ */
+function hypertimer(options) {
+  // options
+  var rate = 1;             // number of milliseconds per milliseconds
+  var deterministic = true; // run simultaneous events in a deterministic order
+
+  // properties
+  var running = false;   // true when running
+  var realTime = null;   // timestamp. the moment in real-time when hyperTime was set
+  var hyperTime = null;  // timestamp. the start time in hyper-time
+  var timeouts = [];     // array with all running timeouts
+  var current = {};      // the timeouts currently in progress (callback is being executed)
+  var timeoutId = null;  // currently running timer
+  var idSeq = 0;         // counter for unique timeout id's
+
+  // exported timer object with public functions and variables
+  var timer = {};
+
+  /**
+   * Change configuration options of the hypertimer, or retrieve current
+   * configuration.
+   * @param {Object} [options]  The following options are available:
+   *                            rate: number | 'discrete'
+   *                                        The rate of speed of hyper time with
+   *                                        respect to real-time in milliseconds
+   *                                        per millisecond. Rate must be a
+   *                                        positive number, or 'discrete' to
+   *                                        run in discrete time (jumping from
+   *                                        event to event). By default, rate is 1.
+   *                            deterministic: boolean
+   *                                        If true (default), simultaneous events
+   *                                        are executed in a deterministic order.
+   * @return {Object} Returns the applied configuration
+   */
+  timer.config = function(options) {
+    if (options) {
+      if ('rate' in options) {
+        var newRate = (options.rate === DISCRETE) ? DISCRETE : Number(options.rate);
+        if (newRate !== DISCRETE && (isNaN(newRate) || newRate <= 0)) {
+          throw new TypeError('rate must be a positive number or the string "discrete"');
+        }
+        hyperTime = timer.now();
+        realTime = util.nowReal();
+        rate = newRate;
+      }
+      if ('deterministic' in options) {
+        deterministic = options.deterministic ? true : false;
+      }
+    }
+
+    // reschedule running timeouts
+    _schedule();
+
+    // return a copy of the configuration options
+    return {
+      rate: rate,
+      deterministic: deterministic
+    };
+  };
+
+  /**
+   * Set the time of the timer. To get the current time, use getTime() or now().
+   * @param {number | Date} time  The time in hyper-time.
+   */
+  timer.setTime = function (time) {
+    if (time instanceof Date) {
+      hyperTime = time.valueOf();
+    }
+    else {
+      var newTime = Number(time);
+      if (isNaN(newTime)) {
+        throw new TypeError('time must be a Date or number');
+      }
+      hyperTime = newTime;
+    }
+
+    // reschedule running timeouts
+    _schedule();
+  };
+
+  /**
+   * Returns the current time of the timer as a number.
+   * See also getTime().
+   * @return {number} The time
+   */
+  timer.now = function () {
+    if (rate === DISCRETE) {
+      return hyperTime;
+    }
+    else {
+      if (running) {
+        // TODO: implement performance.now() / process.hrtime(time) for high precision calculation of time interval
+        var realInterval = util.nowReal() - realTime;
+        var hyperInterval = realInterval * rate;
+        return hyperTime + hyperInterval;
+      }
+      else {
+        return hyperTime;
+      }
+    }
+  };
+
+  /**
+   * Continue the timer.
+   */
+  timer['continue'] = function() {
+    realTime = util.nowReal();
+    running = true;
+
+    // reschedule running timeouts
+    _schedule();
+  };
+
+  /**
+   * Pause the timer. The timer can be continued again with `continue()`
+   */
+  timer.pause = function() {
+    hyperTime = timer.now();
+    realTime = null;
+    running = false;
+
+    // reschedule running timeouts (pauses them)
+    _schedule();
+  };
+
+  /**
+   * Returns the current time of the timer as Date.
+   * See also now().
+   * @return {Date} The time
+   */
+// rename to getTime
+  timer.getTime = function() {
+    return new Date(timer.now());
+  };
+
+  /**
+   * Get the value of the hypertimer. This function returns the result of getTime().
+   * @return {Date} current time
+   */
+  timer.valueOf = timer.getTime;
+
+  /**
+   * Return a string representation of the current hyper-time.
+   * @returns {string} String representation
+   */
+  timer.toString = function () {
+    return timer.getTime().toString();
+  };
+
+  /**
+   * Set a timeout, which is triggered when the timeout occurs in hyper-time.
+   * See also setTrigger.
+   * @param {Function} callback   Function executed when delay is exceeded.
+   * @param {number} delay        The delay in milliseconds. When the delay is
+   *                              smaller or equal to zero, the callback is
+   *                              triggered immediately.
+   * @return {number} Returns a timeoutId which can be used to cancel the
+   *                  timeout using clearTimeout().
+   */
+  timer.setTimeout = function(callback, delay) {
+    var id = idSeq++;
+    var timestamp = timer.now() + delay;
+    if (isNaN(timestamp)) {
+      throw new TypeError('delay must be a number');
+    }
+
+    // add a new timeout to the queue
+    _queueTimeout({
+      id: id,
+      type: TYPE.TIMEOUT,
+      time: timestamp,
+      callback: callback
+    });
+
+    // reschedule the timeouts
+    _schedule();
+
+    return id;
+  };
+
+  /**
+   * Set a trigger, which is triggered when the timeout occurs in hyper-time.
+   * See also getTimeout.
+   * @param {Function} callback   Function executed when timeout occurs.
+   * @param {Date | number} time  An absolute moment in time (Date) when the
+   *                              callback will be triggered. When the date is
+   *                              a Date in the past, the callback is triggered
+   *                              immediately.
+   * @return {number} Returns a triggerId which can be used to cancel the
+   *                  trigger using clearTrigger().
+   */
+  timer.setTrigger = function (callback, time) {
+    var id = idSeq++;
+    var timestamp = Number(time);
+    if (isNaN(timestamp)) {
+      throw new TypeError('time must be a Date or number');
+    }
+
+    // add a new timeout to the queue
+    _queueTimeout({
+      id: id,
+      type: TYPE.TRIGGER,
+      time: timestamp,
+      callback: callback
+    });
+
+    // reschedule the timeouts
+    _schedule();
+
+    return id;
+  };
+
+
+  /**
+   * Trigger a callback every interval. Optionally, a start date can be provided
+   * to specify the first time the callback must be triggered.
+   * See also setTimeout and setTrigger.
+   * @param {Function} callback         Function executed when delay is exceeded.
+   * @param {number} interval           Interval in milliseconds. When interval
+   *                                    is smaller than zero or is infinity, the
+   *                                    interval will be set to zero and triggered
+   *                                    with a maximum rate.
+   * @param {Date | number} [firstTime] An absolute moment in time (Date) when the
+   *                                    callback will be triggered the first time.
+   *                                    By default, firstTime = now() + interval.
+   * @return {number} Returns a intervalId which can be used to cancel the
+   *                  trigger using clearInterval().
+   */
+  timer.setInterval = function(callback, interval, firstTime) {
+    var id = idSeq++;
+
+    var _interval = Number(interval);
+    if (isNaN(_interval)) {
+      throw new TypeError('interval must be a number');
+    }
+    if (_interval < 0 || !isFinite(_interval)) {
+      _interval = 0;
+    }
+
+    var timestamp;
+    if (firstTime != undefined) {
+      timestamp = Number(firstTime);
+      if (isNaN(timestamp)) {
+        throw new TypeError('firstTime must be a Date or number');
+      }
+    }
+    else {
+      // firstTime is undefined or null
+      timestamp = (timer.now() + _interval);
+    }
+
+    // add a new timeout to the queue
+    _queueTimeout({
+      id: id,
+      type: TYPE.INTERVAL,
+      interval: _interval,
+      time: timestamp,
+      firstTime: timestamp,
+      occurrence: 0,
+      callback: callback
+    });
+
+    // reschedule the timeouts
+    _schedule();
+
+    return id;
+  };
+
+  /**
+   * Cancel a timeout
+   * @param {number} timeoutId   The id of a timeout
+   */
+  timer.clearTimeout = function(timeoutId) {
+    // test whether timeout is currently being executed
+    if (current[timeoutId]) {
+      delete current[timeoutId];
+      return;
+    }
+
+    // find the timeout in the queue
+    for (var i = 0; i < timeouts.length; i++) {
+      if (timeouts[i].id === timeoutId) {
+        // remove this timeout from the queue
+        timeouts.splice(i, 1);
+
+        // reschedule timeouts
+        _schedule();
+        break;
+      }
+    }
+  };
+
+  /**
+   * Cancel a trigger
+   * @param {number} triggerId   The id of a trigger
+   */
+  timer.clearTrigger = timer.clearTimeout;
+
+  timer.clearInterval = timer.clearTimeout;
+
+  /**
+   * Returns a list with the id's of all timeouts
+   * @returns {number[]} Timeout id's
+   */
+  timer.list = function () {
+    return timeouts.map(function (timeout) {
+      return timeout.id;
+    });
+  };
+
+  /**
+   * Clear all timeouts
+   */
+  timer.clear = function () {
+    // empty the queue
+    current = {};
+    timeouts = [];
+
+    // reschedule
+    _schedule();
+  };
+
+  /**
+   * Add a timeout to the queue. After the queue has been changed, the queue
+   * must be rescheduled by executing _reschedule()
+   * @param {{id: number, type: number, time: number, callback: Function}} timeout
+   * @private
+   */
+  function _queueTimeout(timeout) {
+    // insert the new timeout at the right place in the array, sorted by time
+    if (timeouts.length > 0) {
+      var i = timeouts.length - 1;
+      while (i >= 0 && timeouts[i].time > timeout.time) {
+        i--;
+      }
+
+      // insert the new timeout in the queue. Note that the timeout is
+      // inserted *after* existing timeouts with the exact *same* time,
+      // so the order in which they are executed is deterministic
+      timeouts.splice(i + 1, 0, timeout);
+    }
+    else {
+      // queue is empty, append the new timeout
+      timeouts.push(timeout);
+    }
+  }
+
+  /**
+   * Execute a timeout
+   * @param {{id: number, type: number, time: number, callback: function}} timeout
+   * @param {function} [callback]
+   *             The callback is executed when the timeout's callback is
+   *             finished. Called without parameters
+   * @private
+   */
+  function _execTimeout(timeout, callback) {
+    // store the timeout in the queue with timeouts in progress
+    // it can be cleared when a clearTimeout is executed inside the callback
+    current[timeout.id] = timeout;
+
+    function finish() {
+      // in case of an interval we have to reschedule on next cycle
+      // interval must not be cleared while executing the callback
+      if (timeout.type === TYPE.INTERVAL && current[timeout.id]) {
+        timeout.occurrence++;
+        timeout.time = timeout.firstTime + timeout.occurrence * timeout.interval;
+        _queueTimeout(timeout);
+      }
+
+      // remove the timeout from the queue with timeouts in progress
+      delete current[timeout.id];
+
+      if (typeof callback === 'function') callback();
+    }
+
+    // execute the callback
+    try {
+      if (timeout.callback.length == 0) {
+        // synchronous timeout,  like `timer.setTimeout(function () {...}, delay)`
+        timeout.callback();
+        finish();
+      } else {
+        // asynchronous timeout, like `timer.setTimeout(function (done) {...; done(); }, delay)`
+        timeout.callback(finish);
+      }
+    } catch (err) {
+      // silently ignore errors thrown by the callback
+      finish();
+    }
+  }
+
+  /**
+   * Remove all timeouts occurring before or on the provided time from the
+   * queue and return them.
+   * @param {number} time    A timestamp
+   * @returns {Array} returns an array containing all expired timeouts
+   * @private
+   */
+  function _getExpiredTimeouts(time) {
+    var i = 0;
+    while (i < timeouts.length && ((timeouts[i].time <= time) || !isFinite(timeouts[i].time))) {
+      i++;
+    }
+    var expired = timeouts.splice(0, i);
+
+    if (deterministic == false) {
+      // the array with expired timeouts is in deterministic order
+      // shuffle them
+      util.shuffle(expired);
+    }
+
+    return expired;
+  }
+
+  /**
+   * Reschedule all queued timeouts
+   * @private
+   */
+  function _schedule() {
+    // do not _schedule when there are timeouts in progress
+    // this can be the case with async timeouts in discrete time.
+    // _schedule will be executed again when all async timeouts are finished.
+    if (rate === DISCRETE && Object.keys(current).length > 0) {
+      return;
+    }
+
+    var next = timeouts[0];
+
+    // cancel timer when running
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+
+    if (running && next) {
+      // schedule next timeout
+      var time = next.time;
+      var delay = time - timer.now();
+      var realDelay = (rate === DISCRETE) ? 0 : delay / rate;
+
+      function onTimeout() {
+        // when running in discrete time, update the hyperTime to the time
+        // of the current event
+        if (rate === DISCRETE) {
+          hyperTime = time;
+        }
+
+        // grab all expired timeouts from the queue
+        var expired = _getExpiredTimeouts(time);
+        // note: expired.length can never be zero (on every change of the queue, we reschedule)
+
+        // execute all expired timeouts
+        if (rate === DISCRETE) {
+          // in discrete time, we execute all expired timeouts serially,
+          // and wait for their completion in order to guarantee deterministic
+          // order of execution
+          function next() {
+            var timeout = expired.shift();
+            if (timeout) {
+              _execTimeout(timeout, next);
+            }
+            else {
+              // schedule the next round
+              _schedule();
+            }
+          }
+          next();
+        }
+        else {
+          // in continuous time, we fire all timeouts in parallel,
+          // and don't await their completion (they can do async operations)
+          expired.forEach(_execTimeout);
+
+          // schedule the next round
+          _schedule();
+        }
+      }
+
+      timeoutId = setTimeout(onTimeout, realDelay);
+    }
+  }
+
+  Object.defineProperty(timer, 'running', {
+    get: function () {
+      return running;
+    }
+  });
+
+  timer.config(options);         // apply options
+  timer.setTime(util.nowReal()); // set time as current real time
+  timer.continue();              // start the timer
+
+  return timer;
+}
+
+module.exports = hypertimer;
+
+},{"./util":41}],41:[function(require,module,exports){
+
+/* istanbul ignore else */
+if (typeof Date.now === 'function') {
+  /**
+   * Helper function to get the current time
+   * @return {number} Current time
+   */
+  exports.nowReal = function () {
+    return Date.now();
+  }
+}
+else {
+  /**
+   * Helper function to get the current time
+   * @return {number} Current time
+   */
+  exports.nowReal = function () {
+    return new Date().valueOf();
+  }
+}
+
+/**
+ * Shuffle an array
+ *
+ * + Jonas Raoni Soares Silva
+ * @ http://jsfromhell.com/array/shuffle [v1.0]
+ *
+ * @param {Array} o   Array to be shuffled
+ * @returns {Array}   Returns the shuffled array
+ */
+exports.shuffle = function (o){
+  for(var j, x, i = o.length; i; j = Math.floor(Math.random() * i), x = o[--i], o[i] = o[j], o[j] = x);
+  return o;
+};
+
+},{}],42:[function(require,module,exports){
 (function (Buffer){
 //     uuid.js
 //
@@ -4001,7 +6436,7 @@ exports.parseUrl = function (url) {
 }).call(this);
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":5,"crypto":4}],33:[function(require,module,exports){
+},{"buffer":5,"crypto":4}],43:[function(require,module,exports){
 'use strict';
 
 var asap = require('asap')
@@ -4108,7 +6543,7 @@ function doResolve(fn, onFulfilled, onRejected) {
   }
 }
 
-},{"asap":35}],34:[function(require,module,exports){
+},{"asap":45}],44:[function(require,module,exports){
 'use strict';
 
 //This file contains then/promise specific extensions to the core promise API
@@ -4290,7 +6725,7 @@ Promise.prototype['catch'] = function (onRejected) {
   return this.then(null, onRejected);
 }
 
-},{"./core.js":33,"asap":35}],35:[function(require,module,exports){
+},{"./core.js":43,"asap":45}],45:[function(require,module,exports){
 (function (process){
 
 // Use the fastest possible means to execute a task in a future turn
@@ -4407,7 +6842,184 @@ module.exports = asap;
 
 
 }).call(this,require('_process'))
-},{"_process":9}],36:[function(require,module,exports){
+},{"_process":9}],46:[function(require,module,exports){
+(function (global){
+'use strict';
+
+var width = 256;// each RC4 output is 0 <= x < 256
+var chunks = 6;// at least six RC4 outputs for each double
+var digits = 52;// there are 52 significant digits in a double
+var pool = [];// pool: entropy pool starts empty
+var GLOBAL = typeof global === 'undefined' ? window : global;
+
+//
+// The following constants are related to IEEE 754 limits.
+//
+var startdenom = Math.pow(width, chunks),
+    significance = Math.pow(2, digits),
+    overflow = significance * 2,
+    mask = width - 1;
+
+
+var oldRandom = Math.random;
+
+//
+// seedrandom()
+// This is the seedrandom function described above.
+//
+module.exports = function(seed, options) {
+  if (options && options.global === true) {
+    options.global = false;
+    Math.random = module.exports(seed, options);
+    options.global = true;
+    return Math.random;
+  }
+  var use_entropy = (options && options.entropy) || false;
+  var key = [];
+
+  // Flatten the seed string or build one from local entropy if needed.
+  var shortseed = mixkey(flatten(
+    use_entropy ? [seed, tostring(pool)] :
+    0 in arguments ? seed : autoseed(), 3), key);
+
+  // Use the seed to initialize an ARC4 generator.
+  var arc4 = new ARC4(key);
+
+  // Mix the randomness into accumulated entropy.
+  mixkey(tostring(arc4.S), pool);
+
+  // Override Math.random
+
+  // This function returns a random double in [0, 1) that contains
+  // randomness in every bit of the mantissa of the IEEE 754 value.
+
+  return function() {         // Closure to return a random double:
+    var n = arc4.g(chunks),             // Start with a numerator n < 2 ^ 48
+        d = startdenom,                 //   and denominator d = 2 ^ 48.
+        x = 0;                          //   and no 'extra last byte'.
+    while (n < significance) {          // Fill up all significant digits by
+      n = (n + x) * width;              //   shifting numerator and
+      d *= width;                       //   denominator and generating a
+      x = arc4.g(1);                    //   new least-significant-byte.
+    }
+    while (n >= overflow) {             // To avoid rounding up, before adding
+      n /= 2;                           //   last byte, shift everything
+      d /= 2;                           //   right using integer Math until
+      x >>>= 1;                         //   we have exactly the desired bits.
+    }
+    return (n + x) / d;                 // Form the number within [0, 1).
+  };
+};
+
+module.exports.resetGlobal = function () {
+  Math.random = oldRandom;
+};
+
+//
+// ARC4
+//
+// An ARC4 implementation.  The constructor takes a key in the form of
+// an array of at most (width) integers that should be 0 <= x < (width).
+//
+// The g(count) method returns a pseudorandom integer that concatenates
+// the next (count) outputs from ARC4.  Its return value is a number x
+// that is in the range 0 <= x < (width ^ count).
+//
+/** @constructor */
+function ARC4(key) {
+  var t, keylen = key.length,
+      me = this, i = 0, j = me.i = me.j = 0, s = me.S = [];
+
+  // The empty key [] is treated as [0].
+  if (!keylen) { key = [keylen++]; }
+
+  // Set up S using the standard key scheduling algorithm.
+  while (i < width) {
+    s[i] = i++;
+  }
+  for (i = 0; i < width; i++) {
+    s[i] = s[j = mask & (j + key[i % keylen] + (t = s[i]))];
+    s[j] = t;
+  }
+
+  // The "g" method returns the next (count) outputs as one number.
+  (me.g = function(count) {
+    // Using instance members instead of closure state nearly doubles speed.
+    var t, r = 0,
+        i = me.i, j = me.j, s = me.S;
+    while (count--) {
+      t = s[i = mask & (i + 1)];
+      r = r * width + s[mask & ((s[i] = s[j = mask & (j + t)]) + (s[j] = t))];
+    }
+    me.i = i; me.j = j;
+    return r;
+    // For robust unpredictability discard an initial batch of values.
+    // See http://www.rsa.com/rsalabs/node.asp?id=2009
+  })(width);
+}
+
+//
+// flatten()
+// Converts an object tree to nested arrays of strings.
+//
+function flatten(obj, depth) {
+  var result = [], typ = (typeof obj)[0], prop;
+  if (depth && typ == 'o') {
+    for (prop in obj) {
+      try { result.push(flatten(obj[prop], depth - 1)); } catch (e) {}
+    }
+  }
+  return (result.length ? result : typ == 's' ? obj : obj + '\0');
+}
+
+//
+// mixkey()
+// Mixes a string seed into a key that is an array of integers, and
+// returns a shortened string seed that is equivalent to the result key.
+//
+function mixkey(seed, key) {
+  var stringseed = seed + '', smear, j = 0;
+  while (j < stringseed.length) {
+    key[mask & j] =
+      mask & ((smear ^= key[mask & j] * 19) + stringseed.charCodeAt(j++));
+  }
+  return tostring(key);
+}
+
+//
+// autoseed()
+// Returns an object for autoseeding, using window.crypto if available.
+//
+/** @param {Uint8Array=} seed */
+function autoseed(seed) {
+  try {
+    GLOBAL.crypto.getRandomValues(seed = new Uint8Array(width));
+    return tostring(seed);
+  } catch (e) {
+    return [+new Date, GLOBAL, GLOBAL.navigator && GLOBAL.navigator.plugins,
+            GLOBAL.screen, tostring(pool)];
+  }
+}
+
+//
+// tostring()
+// Converts an array of charcodes to a string
+//
+function tostring(a) {
+  return String.fromCharCode.apply(0, a);
+}
+
+//
+// When seedrandom.js is loaded, we immediately mix a few bits
+// from the built-in RNG into the entropy pool.  Because we do
+// not want to intefere with determinstic PRNG state later,
+// seedrandom will not call Math.random on its own again after
+// initialization.
+//
+mixkey(Math.random(), pool);
+
+}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{}],47:[function(require,module,exports){
 "use strict";
 /*globals Handlebars: true */
 var Handlebars = require("./handlebars.runtime")["default"];
@@ -4447,7 +7059,7 @@ Handlebars.create = create;
 Handlebars['default'] = Handlebars;
 
 exports["default"] = Handlebars;
-},{"./handlebars.runtime":37,"./handlebars/compiler/ast":39,"./handlebars/compiler/base":40,"./handlebars/compiler/compiler":41,"./handlebars/compiler/javascript-compiler":43}],37:[function(require,module,exports){
+},{"./handlebars.runtime":48,"./handlebars/compiler/ast":50,"./handlebars/compiler/base":51,"./handlebars/compiler/compiler":52,"./handlebars/compiler/javascript-compiler":54}],48:[function(require,module,exports){
 "use strict";
 /*globals Handlebars: true */
 var base = require("./handlebars/base");
@@ -4483,7 +7095,7 @@ Handlebars.create = create;
 Handlebars['default'] = Handlebars;
 
 exports["default"] = Handlebars;
-},{"./handlebars/base":38,"./handlebars/exception":47,"./handlebars/runtime":48,"./handlebars/safe-string":49,"./handlebars/utils":50}],38:[function(require,module,exports){
+},{"./handlebars/base":49,"./handlebars/exception":58,"./handlebars/runtime":59,"./handlebars/safe-string":60,"./handlebars/utils":61}],49:[function(require,module,exports){
 "use strict";
 var Utils = require("./utils");
 var Exception = require("./exception")["default"];
@@ -4715,7 +7327,7 @@ var createFrame = function(object) {
   return frame;
 };
 exports.createFrame = createFrame;
-},{"./exception":47,"./utils":50}],39:[function(require,module,exports){
+},{"./exception":58,"./utils":61}],50:[function(require,module,exports){
 "use strict";
 var Exception = require("../exception")["default"];
 
@@ -4930,7 +7542,7 @@ var AST = {
 // Must be exported as an object rather than the root of the module as the jison lexer
 // most modify the object to operate properly.
 exports["default"] = AST;
-},{"../exception":47}],40:[function(require,module,exports){
+},{"../exception":58}],51:[function(require,module,exports){
 "use strict";
 var parser = require("./parser")["default"];
 var AST = require("./ast")["default"];
@@ -4952,7 +7564,7 @@ function parse(input) {
 }
 
 exports.parse = parse;
-},{"../utils":50,"./ast":39,"./helpers":42,"./parser":44}],41:[function(require,module,exports){
+},{"../utils":61,"./ast":50,"./helpers":53,"./parser":55}],52:[function(require,module,exports){
 "use strict";
 var Exception = require("../exception")["default"];
 var isArray = require("../utils").isArray;
@@ -5405,7 +8017,7 @@ exports.compile = compile;function argEquals(a, b) {
     return true;
   }
 }
-},{"../exception":47,"../utils":50}],42:[function(require,module,exports){
+},{"../exception":58,"../utils":61}],53:[function(require,module,exports){
 "use strict";
 var Exception = require("../exception")["default"];
 
@@ -5593,7 +8205,7 @@ function omitLeft(statements, i, multiple) {
   current.leftStripped = current.string !== original;
   return current.leftStripped;
 }
-},{"../exception":47}],43:[function(require,module,exports){
+},{"../exception":58}],54:[function(require,module,exports){
 "use strict";
 var COMPILER_REVISION = require("../base").COMPILER_REVISION;
 var REVISION_CHANGES = require("../base").REVISION_CHANGES;
@@ -6558,7 +9170,7 @@ JavaScriptCompiler.isValidJavaScriptVariableName = function(name) {
 };
 
 exports["default"] = JavaScriptCompiler;
-},{"../base":38,"../exception":47}],44:[function(require,module,exports){
+},{"../base":49,"../exception":58}],55:[function(require,module,exports){
 "use strict";
 /* jshint ignore:start */
 /* istanbul ignore next */
@@ -7059,7 +9671,7 @@ function Parser () { this.yy = {}; }Parser.prototype = parser;parser.Parser = Pa
 return new Parser;
 })();exports["default"] = handlebars;
 /* jshint ignore:end */
-},{}],45:[function(require,module,exports){
+},{}],56:[function(require,module,exports){
 "use strict";
 var Visitor = require("./visitor")["default"];
 
@@ -7201,7 +9813,7 @@ PrintVisitor.prototype.content = function(content) {
 PrintVisitor.prototype.comment = function(comment) {
   return this.pad("{{! '" + comment.comment + "' }}");
 };
-},{"./visitor":46}],46:[function(require,module,exports){
+},{"./visitor":57}],57:[function(require,module,exports){
 "use strict";
 function Visitor() {}
 
@@ -7214,7 +9826,7 @@ Visitor.prototype = {
 };
 
 exports["default"] = Visitor;
-},{}],47:[function(require,module,exports){
+},{}],58:[function(require,module,exports){
 "use strict";
 
 var errorProps = ['description', 'fileName', 'lineNumber', 'message', 'name', 'number', 'stack'];
@@ -7243,7 +9855,7 @@ function Exception(message, node) {
 Exception.prototype = new Error();
 
 exports["default"] = Exception;
-},{}],48:[function(require,module,exports){
+},{}],59:[function(require,module,exports){
 "use strict";
 var Utils = require("./utils");
 var Exception = require("./exception")["default"];
@@ -7437,7 +10049,7 @@ exports.noop = noop;function initData(context, data) {
   }
   return data;
 }
-},{"./base":38,"./exception":47,"./utils":50}],49:[function(require,module,exports){
+},{"./base":49,"./exception":58,"./utils":61}],60:[function(require,module,exports){
 "use strict";
 // Build out our basic SafeString type
 function SafeString(string) {
@@ -7449,7 +10061,7 @@ SafeString.prototype.toString = function() {
 };
 
 exports["default"] = SafeString;
-},{}],50:[function(require,module,exports){
+},{}],61:[function(require,module,exports){
 "use strict";
 /*jshint -W004 */
 var SafeString = require("./safe-string")["default"];
@@ -7538,7 +10150,7 @@ exports.isEmpty = isEmpty;function appendContextPath(contextPath, id) {
 }
 
 exports.appendContextPath = appendContextPath;
-},{"./safe-string":49}],51:[function(require,module,exports){
+},{"./safe-string":60}],62:[function(require,module,exports){
 // USAGE:
 // var handlebars = require('handlebars');
 
@@ -7566,7 +10178,7 @@ if (typeof require !== 'undefined' && require.extensions) {
   require.extensions[".hbs"] = extension;
 }
 
-},{"../dist/cjs/handlebars":36,"../dist/cjs/handlebars/compiler/printer":45,"../dist/cjs/handlebars/compiler/visitor":46,"fs":4}],52:[function(require,module,exports){
+},{"../dist/cjs/handlebars":47,"../dist/cjs/handlebars/compiler/printer":56,"../dist/cjs/handlebars/compiler/visitor":57,"fs":4}],63:[function(require,module,exports){
 // utils
 exports.util = require('./lib/util');
 exports.DOMutil = require('./lib/DOMutil');
@@ -7638,7 +10250,7 @@ exports.Graph = function () {
 exports.moment = require('./lib/module/moment');
 exports.hammer = require('./lib/module/hammer');
 
-},{"./lib/DOMutil":53,"./lib/DataSet":54,"./lib/DataView":55,"./lib/graph3d/Camera":56,"./lib/graph3d/Filter":57,"./lib/graph3d/Graph3d":58,"./lib/graph3d/Point2d":59,"./lib/graph3d/Point3d":60,"./lib/graph3d/Slider":61,"./lib/graph3d/StepNumber":62,"./lib/module/hammer":64,"./lib/module/moment":65,"./lib/network/Edge":66,"./lib/network/Groups":67,"./lib/network/Images":68,"./lib/network/Network":69,"./lib/network/Node":70,"./lib/network/Popup":71,"./lib/network/dotparser":72,"./lib/network/gephiParser":73,"./lib/timeline/DataStep":89,"./lib/timeline/Graph2d":90,"./lib/timeline/Range":91,"./lib/timeline/Stack":92,"./lib/timeline/TimeStep":93,"./lib/timeline/Timeline":94,"./lib/timeline/component/Component":95,"./lib/timeline/component/CurrentTime":96,"./lib/timeline/component/CustomTime":97,"./lib/timeline/component/DataAxis":98,"./lib/timeline/component/GraphGroup":99,"./lib/timeline/component/Group":100,"./lib/timeline/component/ItemSet":101,"./lib/timeline/component/Legend":102,"./lib/timeline/component/LineGraph":103,"./lib/timeline/component/TimeAxis":104,"./lib/timeline/component/item/BackgroundItem":105,"./lib/timeline/component/item/BoxItem":106,"./lib/timeline/component/item/Item":107,"./lib/timeline/component/item/PointItem":108,"./lib/timeline/component/item/RangeItem":109,"./lib/util":111}],53:[function(require,module,exports){
+},{"./lib/DOMutil":64,"./lib/DataSet":65,"./lib/DataView":66,"./lib/graph3d/Camera":67,"./lib/graph3d/Filter":68,"./lib/graph3d/Graph3d":69,"./lib/graph3d/Point2d":70,"./lib/graph3d/Point3d":71,"./lib/graph3d/Slider":72,"./lib/graph3d/StepNumber":73,"./lib/module/hammer":75,"./lib/module/moment":76,"./lib/network/Edge":77,"./lib/network/Groups":78,"./lib/network/Images":79,"./lib/network/Network":80,"./lib/network/Node":81,"./lib/network/Popup":82,"./lib/network/dotparser":83,"./lib/network/gephiParser":84,"./lib/timeline/DataStep":100,"./lib/timeline/Graph2d":101,"./lib/timeline/Range":102,"./lib/timeline/Stack":103,"./lib/timeline/TimeStep":104,"./lib/timeline/Timeline":105,"./lib/timeline/component/Component":106,"./lib/timeline/component/CurrentTime":107,"./lib/timeline/component/CustomTime":108,"./lib/timeline/component/DataAxis":109,"./lib/timeline/component/GraphGroup":110,"./lib/timeline/component/Group":111,"./lib/timeline/component/ItemSet":112,"./lib/timeline/component/Legend":113,"./lib/timeline/component/LineGraph":114,"./lib/timeline/component/TimeAxis":115,"./lib/timeline/component/item/BackgroundItem":116,"./lib/timeline/component/item/BoxItem":117,"./lib/timeline/component/item/Item":118,"./lib/timeline/component/item/PointItem":119,"./lib/timeline/component/item/RangeItem":120,"./lib/util":122}],64:[function(require,module,exports){
 // DOM utility methods
 
 /**
@@ -7810,7 +10422,7 @@ exports.drawBar = function (x, y, width, height, className, JSONcontainer, svgCo
     rect.setAttributeNS(null, "class", className);
 //  }
 };
-},{}],54:[function(require,module,exports){
+},{}],65:[function(require,module,exports){
 var util = require('./util');
 
 /**
@@ -8758,7 +11370,7 @@ DataSet.prototype._appendRow = function (dataTable, columns, item) {
 
 module.exports = DataSet;
 
-},{"./util":111}],55:[function(require,module,exports){
+},{"./util":122}],66:[function(require,module,exports){
 var util = require('./util');
 var DataSet = require('./DataSet');
 
@@ -9060,7 +11672,7 @@ DataView.prototype.subscribe = DataView.prototype.on;
 DataView.prototype.unsubscribe = DataView.prototype.off;
 
 module.exports = DataView;
-},{"./DataSet":54,"./util":111}],56:[function(require,module,exports){
+},{"./DataSet":65,"./util":122}],67:[function(require,module,exports){
 var Point3d = require('./Point3d');
 
 /**
@@ -9196,7 +11808,7 @@ Camera.prototype.calculateCameraOrientation = function() {
 };
 
 module.exports = Camera;
-},{"./Point3d":60}],57:[function(require,module,exports){
+},{"./Point3d":71}],68:[function(require,module,exports){
 var DataView = require('../DataView');
 
 /**
@@ -9416,7 +12028,7 @@ Filter.prototype.loadInBackground = function(index) {
 
 module.exports = Filter;
 
-},{"../DataView":55}],58:[function(require,module,exports){
+},{"../DataView":66}],69:[function(require,module,exports){
 var Emitter = require('emitter-component');
 var DataSet = require('../DataSet');
 var DataView = require('../DataView');
@@ -11686,7 +14298,7 @@ getMouseY = function(event) {
 
 module.exports = Graph3d;
 
-},{"../DataSet":54,"../DataView":55,"../util":111,"./Camera":56,"./Filter":57,"./Point2d":59,"./Point3d":60,"./Slider":61,"./StepNumber":62,"emitter-component":112}],59:[function(require,module,exports){
+},{"../DataSet":65,"../DataView":66,"../util":122,"./Camera":67,"./Filter":68,"./Point2d":70,"./Point3d":71,"./Slider":72,"./StepNumber":73,"emitter-component":123}],70:[function(require,module,exports){
 /**
  * @prototype Point2d
  * @param {Number} [x]
@@ -11699,7 +14311,7 @@ Point2d = function (x, y) {
 
 module.exports = Point2d;
 
-},{}],60:[function(require,module,exports){
+},{}],71:[function(require,module,exports){
 /**
  * @prototype Point3d
  * @param {Number} [x]
@@ -11786,7 +14398,7 @@ Point3d.prototype.length = function() {
 
 module.exports = Point3d;
 
-},{}],61:[function(require,module,exports){
+},{}],72:[function(require,module,exports){
 var util = require('../util');
 
 /**
@@ -12134,7 +14746,7 @@ Slider.prototype._onMouseUp = function (event) {
 
 module.exports = Slider;
 
-},{"../util":111}],62:[function(require,module,exports){
+},{"../util":122}],73:[function(require,module,exports){
 /**
  * @prototype StepNumber
  * The class StepNumber is an iterator for Numbers. You provide a start and end
@@ -12276,7 +14888,7 @@ StepNumber.prototype.end = function () {
 
 module.exports = StepNumber;
 
-},{}],63:[function(require,module,exports){
+},{}],74:[function(require,module,exports){
 var Hammer = require('./module/hammer');
 
 /**
@@ -12306,7 +14918,7 @@ exports.fakeGesture = function(element, event) {
   return gesture;
 };
 
-},{"./module/hammer":64}],64:[function(require,module,exports){
+},{"./module/hammer":75}],75:[function(require,module,exports){
 // Only load hammer.js when in a browser environment
 // (loading hammer.js in a node.js environment gives errors)
 if (typeof window !== 'undefined') {
@@ -12318,12 +14930,12 @@ else {
   }
 }
 
-},{"hammerjs":113}],65:[function(require,module,exports){
+},{"hammerjs":124}],76:[function(require,module,exports){
 // first check if moment.js is already loaded in the browser window, if so,
 // use this instance. Else, load via commonjs.
 module.exports = (typeof window !== 'undefined') && window['moment'] || require('moment');
 
-},{"moment":114}],66:[function(require,module,exports){
+},{"moment":125}],77:[function(require,module,exports){
 var util = require('../util');
 var Node = require('./Node');
 
@@ -12364,6 +14976,7 @@ function Edge (properties, network, networkConstants) {
   this.value  = undefined;
   this.selected = false;
   this.hover = false;
+  this.labelDimensions = {top:0,left:0,width:0,height:0};
 
   this.from = null;   // a node
   this.to = null;     // a node
@@ -12873,22 +15486,26 @@ Edge.prototype._label = function (ctx, text, x, y) {
     // TODO: cache the calculated size
     ctx.font = ((this.from.selected || this.to.selected) ? "bold " : "") +
         this.options.fontSize + "px " + this.options.fontFace;
-    ctx.fillStyle = this.options.fontFill;
+
 
     var lines = String(text).split('\n');
     var lineCount = lines.length;
     var fontSize = (Number(this.options.fontSize) + 4);
     var yLine = y + (1 - lineCount) / 2 * fontSize;
 
+    var width = ctx.measureText(lines[0]).width;
+    for (var i = 1; i < lineCount; i++) {
+      var lineWidth = ctx.measureText(lines[i]).width;
+      width = lineWidth > width ? lineWidth : width;
+    }
+    var height = this.options.fontSize * lineCount;
+    var left = x - width / 2;
+    var top = y - height / 2;
+
+    this.labelDimensions = {top:top,left:left,width:width,height:height};
+
     if (this.options.fontFill !== undefined && this.options.fontFill !== null && this.options.fontFill !== "none") {
-      var width = ctx.measureText(lines[0]).width;
-      for (var i = 1; i < lineCount; i++) {
-        var lineWidth = ctx.measureText(lines[i]).width;
-        width = lineWidth > width ? lineWidth : width;
-      }
-      var height = this.options.fontSize * lineCount;
-      var left = x - width / 2;
-      var top = y - height / 2;
+      ctx.fillStyle = this.options.fontFill;
       ctx.fillRect(left, top, width, height);
     }
 
@@ -13244,6 +15861,7 @@ Edge.prototype._drawArrow = function(ctx) {
  * @private
  */
 Edge.prototype._getDistanceToEdge = function (x1,y1, x2,y2, x3,y3) { // x3,y3 is the point
+  var returnValue = 0;
   if (this.from != this.to) {
     if (this.options.smoothCurves.enabled == true) {
       var xVia, yVia;
@@ -13269,10 +15887,10 @@ Edge.prototype._getDistanceToEdge = function (x1,y1, x2,y2, x3,y3) { // x3,y3 is
         }
         lastX = x; lastY = y;
       }
-      return minDistance
+      returnValue = minDistance;
     }
     else {
-      return this._getDistanceToLine(x1,y1,x2,y2,x3,y3);
+      returnValue = this._getDistanceToLine(x1,y1,x2,y2,x3,y3);
     }
   }
   else {
@@ -13289,7 +15907,17 @@ Edge.prototype._getDistanceToEdge = function (x1,y1, x2,y2, x3,y3) { // x3,y3 is
     }
     dx = x - x3;
     dy = y - y3;
-    return Math.abs(Math.sqrt(dx*dx + dy*dy) - radius);
+    returnValue = Math.abs(Math.sqrt(dx*dx + dy*dy) - radius);
+  }
+
+  if (this.labelDimensions.left < x3 &&
+    this.labelDimensions.left + this.labelDimensions.width > x3 &&
+    this.labelDimensions.top < y3 &&
+    this.labelDimensions.top + this.labelDimensions.height > y3) {
+    return 0;
+  }
+  else {
+    return returnValue;
   }
 };
 
@@ -13495,7 +16123,7 @@ Edge.prototype.getControlNodePositions = function(ctx) {
 };
 
 module.exports = Edge;
-},{"../util":111,"./Node":70}],67:[function(require,module,exports){
+},{"../util":122,"./Node":81}],78:[function(require,module,exports){
 var util = require('../util');
 
 /**
@@ -13580,7 +16208,7 @@ Groups.prototype.add = function (groupname, style) {
 
 module.exports = Groups;
 
-},{"../util":111}],68:[function(require,module,exports){
+},{"../util":122}],79:[function(require,module,exports){
 /**
  * @class Images
  * This class loads images and keeps them stored.
@@ -13634,7 +16262,7 @@ Images.prototype.load = function(url, brokenUrl) {
 
 module.exports = Images;
 
-},{}],69:[function(require,module,exports){
+},{}],80:[function(require,module,exports){
 var Emitter = require('emitter-component');
 var Hammer = require('../module/hammer');
 var mousetrap = require('mousetrap');
@@ -14490,6 +17118,8 @@ Network.prototype._handleDragStart = function() {
       this._selectObject(node,false);
     }
 
+    this.emit("dragStart",{nodeIds:this.getSelection().nodes});
+
     // create an array with the selected nodes and their original location and status
     for (var objectId in this.selectionObj.nodes) {
       if (this.selectionObj.nodes.hasOwnProperty(objectId)) {
@@ -14535,10 +17165,10 @@ Network.prototype._handleOnDrag = function(event) {
     return;
   }
 
+  // remove the focus on node if it is focussed on by the focusOnNode
   this.releaseNode();
 
   var pointer = this._getPointer(event.gesture.center);
-
   var me = this;
   var drag = this.drag;
   var selection = drag.selection;
@@ -14588,7 +17218,12 @@ Network.prototype._handleOnDrag = function(event) {
  * handle drag start event
  * @private
  */
-Network.prototype._onDragEnd = function () {
+Network.prototype._onDragEnd = function (event) {
+  this._handleDragEnd(event);
+};
+
+
+Network.prototype._handleDragEnd = function(event) {
   this.drag.dragging = false;
   var selection = this.drag.selection;
   if (selection && selection.length) {
@@ -14603,9 +17238,8 @@ Network.prototype._onDragEnd = function () {
   else {
     this._redraw();
   }
-
-};
-
+  this.emit("dragEnd",{nodeIds:this.getSelection().nodes});
+}
 /**
  * handle tap/click event: select/unselect a node
  * @private
@@ -15244,6 +17878,7 @@ Network.prototype._reconnectEdges = function() {
   for (id in nodes) {
     if (nodes.hasOwnProperty(id)) {
       nodes[id].edges = [];
+      nodes[id].dynamicEdges = [];
     }
   }
 
@@ -15711,7 +18346,6 @@ Network.prototype._animationStep = function() {
   var renderTime = Date.now();
   this._redraw();
   this.renderTime = Date.now() - renderTime;
-
 };
 
 if (typeof window !== 'undefined') {
@@ -15747,7 +18381,6 @@ Network.prototype.start = function() {
   }
   else {
     this._redraw();
-
     if (this.stabilizationIterations > 0) {
       // trigger the "stabilized" event.
       // The event is triggered on the next tick, to prevent the case that
@@ -16111,7 +18744,7 @@ Network.prototype.getScale = function () {
 
 module.exports = Network;
 
-},{"../DataSet":54,"../DataView":55,"../hammerUtil":63,"../module/hammer":64,"../shared/Activator":87,"../util":111,"./Edge":66,"./Groups":67,"./Images":68,"./Node":70,"./Popup":71,"./dotparser":72,"./gephiParser":73,"./locales":74,"./mixins/MixinLoader":78,"./shapes":86,"emitter-component":112,"mousetrap":115}],70:[function(require,module,exports){
+},{"../DataSet":65,"../DataView":66,"../hammerUtil":74,"../module/hammer":75,"../shared/Activator":98,"../util":122,"./Edge":77,"./Groups":78,"./Images":79,"./Node":81,"./Popup":82,"./dotparser":83,"./gephiParser":84,"./locales":85,"./mixins/MixinLoader":89,"./shapes":97,"emitter-component":123,"mousetrap":126}],81:[function(require,module,exports){
 var util = require('../util');
 
 /**
@@ -16156,6 +18789,8 @@ function Node(properties, imagelist, grouplist, networkConstants) {
   this.id = undefined;
   this.x = null;
   this.y = null;
+  this.allowedToMoveX = false;
+  this.allowedToMoveY = false;
   this.xFixed = false;
   this.yFixed = false;
   this.horizontalAlignLeft = true; // these are for the navigation controls
@@ -16177,7 +18812,6 @@ function Node(properties, imagelist, grouplist, networkConstants) {
   this.vy = 0.0;  // velocity y
   this.damping = networkConstants.physics.damping; // written every time gravity is calculated
   this.fixedData = {x:null,y:null};
-
 
   this.setProperties(properties, constants);
 
@@ -16233,6 +18867,9 @@ Node.prototype.detachEdge = function(edge) {
   var index = this.edges.indexOf(edge);
   if (index != -1) {
     this.edges.splice(index, 1);
+  }
+  index = this.dynamicEdges.indexOf(edge);
+  if (index != -1) {
     this.dynamicEdges.splice(index, 1);
   }
   this.dynamicEdgesLength = this.dynamicEdges.length;
@@ -16297,14 +18934,30 @@ Node.prototype.setProperties = function(properties, constants) {
     }
   }
 
-  this.xFixed = this.xFixed || (properties.x !== undefined && !properties.allowedToMoveX);
-  this.yFixed = this.yFixed || (properties.y !== undefined && !properties.allowedToMoveY);
+  if (properties.allowedToMoveX !== undefined) {
+    this.xFixed = !properties.allowedToMoveX;
+    this.allowedToMoveX = properties.allowedToMoveX;
+  }
+  else if (properties.x !== undefined && this.allowedToMoveX == false) {
+    this.xFixed = true;
+  }
+
+
+  if (properties.allowedToMoveY !== undefined) {
+    this.yFixed = !properties.allowedToMoveY;
+    this.allowedToMoveY = properties.allowedToMoveY;
+  }
+  else if (properties.y !== undefined && this.allowedToMoveY == false) {
+    this.yFixed = true;
+  }
+
   this.radiusFixed = this.radiusFixed || (properties.radius !== undefined);
 
   if (this.options.shape == 'image') {
     this.options.radiusMin = constants.nodes.widthMin;
     this.options.radiusMax = constants.nodes.widthMax;
   }
+
 
 
   // choose draw method depending on the shape
@@ -16325,6 +18978,7 @@ Node.prototype.setProperties = function(properties, constants) {
   }
   // reset the size of the node, this can be changed
   this._reset();
+
 };
 
 /**
@@ -16448,12 +19102,20 @@ Node.prototype.discreteStep = function(interval) {
     this.vx += ax * interval;               // velocity
     this.x  += this.vx * interval;          // position
   }
+  else {
+    this.fx = 0;
+    this.vx = 0;
+  }
 
   if (!this.yFixed) {
     var dy   = this.damping * this.vy;     // damping force
     var ay   = (this.fy - dy) / this.options.mass;  // acceleration
     this.vy += ay * interval;               // velocity
     this.y  += this.vy * interval;          // position
+  }
+  else {
+    this.fy = 0;
+    this.vy = 0;
   }
 };
 
@@ -16474,6 +19136,7 @@ Node.prototype.discreteStepLimited = function(interval, maxVelocity) {
   }
   else {
     this.fx = 0;
+    this.vx = 0;
   }
 
   if (!this.yFixed) {
@@ -16485,6 +19148,7 @@ Node.prototype.discreteStepLimited = function(interval, maxVelocity) {
   }
   else {
     this.fy = 0;
+    this.vy = 0;
   }
 };
 
@@ -17097,7 +19761,7 @@ Node.prototype.updateVelocity = function(massBeforeClustering) {
 
 module.exports = Node;
 
-},{"../util":111}],71:[function(require,module,exports){
+},{"../util":122}],82:[function(require,module,exports){
 /**
  * Popup is a class to create a popup window with some text
  * @param {Element}  container     The container object.
@@ -17233,7 +19897,7 @@ Popup.prototype.hide = function () {
 
 module.exports = Popup;
 
-},{}],72:[function(require,module,exports){
+},{}],83:[function(require,module,exports){
 /**
  * Parse a text source containing data in DOT language into a JSON object.
  * The object contains two lists: one with nodes and one with edges.
@@ -18061,7 +20725,7 @@ function DOTToGraph (data) {
 exports.parseDOT = parseDOT;
 exports.DOTToGraph = DOTToGraph;
 
-},{}],73:[function(require,module,exports){
+},{}],84:[function(require,module,exports){
 
 function parseGephi(gephiJSON, options) {
   var edges = [];
@@ -18122,7 +20786,7 @@ function parseGephi(gephiJSON, options) {
 }
 
 exports.parseGephi = parseGephi;
-},{}],74:[function(require,module,exports){
+},{}],85:[function(require,module,exports){
 // English
 exports['en'] = {
   edit: 'Edit',
@@ -18159,7 +20823,7 @@ exports['nl'] = {
 exports['nl_NL'] = exports['nl'];
 exports['nl_BE'] = exports['nl'];
 
-},{}],75:[function(require,module,exports){
+},{}],86:[function(require,module,exports){
 /**
  * Creation of the ClusterMixin var.
  *
@@ -19298,7 +21962,7 @@ exports._getChainFraction = function() {
   return chains/total;
 };
 
-},{}],76:[function(require,module,exports){
+},{}],87:[function(require,module,exports){
 exports._resetLevels = function() {
   for (var nodeId in this.nodes) {
     if (this.nodes.hasOwnProperty(nodeId)) {
@@ -19711,7 +22375,7 @@ exports._restoreNodes = function() {
   }
 };
 
-},{}],77:[function(require,module,exports){
+},{}],88:[function(require,module,exports){
 var util = require('../../util');
 var Node = require('../Node');
 var Edge = require('../Edge');
@@ -19934,8 +22598,12 @@ exports._createAddEdgeToolbar = function() {
   // temporarily overload functions
   this.cachedFunctions["_handleTouch"] = this._handleTouch;
   this.cachedFunctions["_handleOnRelease"] = this._handleOnRelease;
+  this.cachedFunctions["_handleDragStart"] = this._handleDragStart;
+  this.cachedFunctions["_handleDragEnd"] = this._handleDragEnd;
   this._handleTouch = this._handleConnect;
-  this._handleOnRelease = this._finishConnect;
+  this._handleOnRelease = function () {};
+  this._handleDragStart = function () {};
+  this._handleDragEnd = this._finishConnect;
 
   // redraw to show the unselect
   this._redraw();
@@ -19988,9 +22656,6 @@ exports._createEditEdgeToolbar = function() {
 };
 
 
-
-
-
 /**
  * the function bound to the selection event. It checks if you want to connect a cluster and changes the description
  * to walk the user through the process.
@@ -20007,6 +22672,7 @@ exports._selectControlNode = function(pointer) {
   }
   this._redraw();
 };
+
 
 /**
  * the function bound to the selection event. It checks if you want to connect a cluster and changes the description
@@ -20051,7 +22717,6 @@ exports._releaseControlNode = function(pointer) {
 exports._handleConnect = function(pointer) {
   if (this._getSelectedNodeCount() == 0) {
     var node = this._getNodeAt(pointer);
-    var supportNodes, targetNode, targetViaNode, connectionEdge;
 
     if (node != null) {
       if (node.clusterSize > 1) {
@@ -20059,35 +22724,33 @@ exports._handleConnect = function(pointer) {
       }
       else {
         this._selectObject(node,false);
-        supportNodes = this.sectors['support']['nodes'];
+        var supportNodes = this.sectors['support']['nodes'];
 
-          // create a node the temporary line can look at
-        supportNodes['targetNode'] = targetNode = new Node({id:'targetNode'},{},{},this.constants);
+        // create a node the temporary line can look at
+        supportNodes['targetNode'] = new Node({id:'targetNode'},{},{},this.constants);
+        var targetNode = supportNodes['targetNode'];
         targetNode.x = node.x;
         targetNode.y = node.y;
 
-        supportNodes['targetViaNode'] = targetViaNode = new Node({id:'targetViaNode'},{},{},this.constants);
-        targetViaNode.x = node.x;
-        targetViaNode.y = node.y;
-        targetViaNode.parentEdgeId = "connectionEdge";
-
         // create a temporary edge
-        this.edges['connectionEdge'] = connectionEdge = new Edge({id:"connectionEdge",from:node.id,to:targetNode.id}, this, this.constants);
+        this.edges['connectionEdge'] = new Edge({id:"connectionEdge",from:node.id,to:targetNode.id}, this, this.constants);
+        var connectionEdge = this.edges['connectionEdge'];
         connectionEdge.from = node;
         connectionEdge.connected = true;
-        connectionEdge.smooth = true;
+        connectionEdge.options.smoothCurves = {enabled: true,
+            dynamic: false,
+            type: "continuous",
+            roundness: 0.5
+        };
         connectionEdge.selected = true;
         connectionEdge.to = targetNode;
-        connectionEdge.via = targetViaNode;
 
         this.cachedFunctions["_handleOnDrag"] = this._handleOnDrag;
         this._handleOnDrag = function(event) {
           var pointer = this._getPointer(event.gesture.center);
-          var supportNodes = this.sectors['support']['nodes'];
-          supportNodes['targetNode'].x = this._XconvertDOMtoCanvas(pointer.x);
-          supportNodes['targetNode'].y = this._YconvertDOMtoCanvas(pointer.y);
-          supportNodes['targetViaNode'].x = 0.5 * (this._XconvertDOMtoCanvas(pointer.x) + this.edges['connectionEdge'].from.x);
-          supportNodes['targetViaNode'].y = this._YconvertDOMtoCanvas(pointer.y);
+          var connectionEdge = this.edges['connectionEdge'];
+          connectionEdge.to.x = this._XconvertDOMtoCanvas(pointer.x);
+          connectionEdge.to.y = this._YconvertDOMtoCanvas(pointer.y);
         };
 
         this.moving = true;
@@ -20097,9 +22760,9 @@ exports._handleConnect = function(pointer) {
   }
 };
 
-exports._finishConnect = function(pointer) {
+exports._finishConnect = function(event) {
   if (this._getSelectedNodeCount() == 1) {
-
+    var pointer = this._getPointer(event.gesture.center);
     // restore the drag function
     this._handleOnDrag = this.cachedFunctions["_handleOnDrag"];
     delete this.cachedFunctions["_handleOnDrag"];
@@ -20304,7 +22967,7 @@ exports._deleteSelected = function() {
   }
 };
 
-},{"../../util":111,"../Edge":66,"../Node":70}],78:[function(require,module,exports){
+},{"../../util":122,"../Edge":77,"../Node":81}],89:[function(require,module,exports){
 var PhysicsMixin = require('./physics/PhysicsMixin');
 var ClusterMixin = require('./ClusterMixin');
 var SectorsMixin = require('./SectorsMixin');
@@ -20504,7 +23167,7 @@ exports._loadHierarchySystem = function () {
   this._loadMixin(HierarchicalLayoutMixin);
 };
 
-},{"./ClusterMixin":75,"./HierarchicalLayoutMixin":76,"./ManipulationMixin":77,"./NavigationMixin":79,"./SectorsMixin":80,"./SelectionMixin":81,"./physics/PhysicsMixin":84}],79:[function(require,module,exports){
+},{"./ClusterMixin":86,"./HierarchicalLayoutMixin":87,"./ManipulationMixin":88,"./NavigationMixin":90,"./SectorsMixin":91,"./SelectionMixin":92,"./physics/PhysicsMixin":95}],90:[function(require,module,exports){
 var util = require('../../util');
 var Hammer = require('../../module/hammer');
 
@@ -20687,7 +23350,7 @@ exports._xStopMoving = function(event) {
   event && event.preventDefault();
 };
 
-},{"../../module/hammer":64,"../../util":111}],80:[function(require,module,exports){
+},{"../../module/hammer":75,"../../util":122}],91:[function(require,module,exports){
 var util = require('../../util');
 
 /**
@@ -21241,7 +23904,7 @@ exports._drawAllSectorNodes = function(ctx) {
   this._loadLatestSector();
 };
 
-},{"../../util":111}],81:[function(require,module,exports){
+},{"../../util":122}],92:[function(require,module,exports){
 var Node = require('../Node');
 
 /**
@@ -21948,7 +24611,7 @@ exports._updateSelection = function () {
   }
 };
 
-},{"../Node":70}],82:[function(require,module,exports){
+},{"../Node":81}],93:[function(require,module,exports){
 /**
  * This function calculates the forces the nodes apply on eachother based on a gravitational model.
  * The Barnes Hut method is used to speed up this N-body simulation.
@@ -22349,7 +25012,7 @@ exports._drawBranch = function(branch,ctx,color) {
    */
 };
 
-},{}],83:[function(require,module,exports){
+},{}],94:[function(require,module,exports){
 /**
  * Calculate the forces the nodes apply on eachother based on a repulsion field.
  * This field is linearly approximated.
@@ -22504,7 +25167,7 @@ exports._calculateHierarchicalSpringForces = function () {
   }
 
 };
-},{}],84:[function(require,module,exports){
+},{}],95:[function(require,module,exports){
 var util = require('../../../util');
 var RepulsionMixin = require('./RepulsionMixin');
 var HierarchialRepulsionMixin = require('./HierarchialRepulsionMixin');
@@ -23214,7 +25877,7 @@ function showValueOfRange (id,map,constantsVariableName) {
   this.start();
 }
 
-},{"../../../util":111,"./BarnesHutMixin":82,"./HierarchialRepulsionMixin":83,"./RepulsionMixin":85}],85:[function(require,module,exports){
+},{"../../../util":122,"./BarnesHutMixin":93,"./HierarchialRepulsionMixin":94,"./RepulsionMixin":96}],96:[function(require,module,exports){
 /**
  * Calculate the forces the nodes apply on each other based on a repulsion field.
  * This field is linearly approximated.
@@ -23274,7 +25937,7 @@ exports._calculateNodeForces = function () {
   }
 };
 
-},{}],86:[function(require,module,exports){
+},{}],97:[function(require,module,exports){
 /**
  * Canvas shapes used by Network
  */
@@ -23501,7 +26164,7 @@ if (typeof CanvasRenderingContext2D !== 'undefined') {
   // TODO: add diamond shape
 }
 
-},{}],87:[function(require,module,exports){
+},{}],98:[function(require,module,exports){
 var mousetrap = require('mousetrap');
 var Emitter = require('emitter-component');
 var Hammer = require('../module/hammer');
@@ -23649,7 +26312,7 @@ function _hasParent(element, parent) {
 
 module.exports = Activator;
 
-},{"../module/hammer":64,"../util":111,"emitter-component":112,"mousetrap":115}],88:[function(require,module,exports){
+},{"../module/hammer":75,"../util":122,"emitter-component":123,"mousetrap":126}],99:[function(require,module,exports){
 var Emitter = require('emitter-component');
 var Hammer = require('../module/hammer');
 var util = require('../util');
@@ -24474,7 +27137,7 @@ Core.prototype._getScrollTop = function () {
 
 module.exports = Core;
 
-},{"../DataSet":54,"../DataView":55,"../module/hammer":64,"../shared/Activator":87,"../util":111,"./Range":91,"./component/CurrentTime":96,"./component/CustomTime":97,"./component/ItemSet":101,"./component/TimeAxis":104,"emitter-component":112}],89:[function(require,module,exports){
+},{"../DataSet":65,"../DataView":66,"../module/hammer":75,"../shared/Activator":98,"../util":122,"./Range":102,"./component/CurrentTime":107,"./component/CustomTime":108,"./component/ItemSet":112,"./component/TimeAxis":115,"emitter-component":123}],100:[function(require,module,exports){
 /**
  * @constructor  DataStep
  * The class DataStep is an iterator for data for the lineGraph. You provide a start data point and an
@@ -24657,16 +27320,18 @@ DataStep.prototype.previous = function() {
  */
 DataStep.prototype.getCurrent = function() {
   var toPrecision = '' + Number(this.current).toPrecision(5);
-  for (var i = toPrecision.length-1; i > 0; i--) {
-    if (toPrecision[i] == "0") {
-      toPrecision = toPrecision.slice(0,i);
-    }
-    else if (toPrecision[i] == "." || toPrecision[i] == ",") {
-      toPrecision = toPrecision.slice(0,i);
-      break;
-    }
-    else{
-      break;
+  if (toPrecision.indexOf(",") != -1 || toPrecision.indexOf(".") != -1) {
+    for (var i = toPrecision.length-1; i > 0; i--) {
+      if (toPrecision[i] == "0") {
+        toPrecision = toPrecision.slice(0,i);
+      }
+      else if (toPrecision[i] == "." || toPrecision[i] == ",") {
+        toPrecision = toPrecision.slice(0,i);
+        break;
+      }
+      else{
+        break;
+      }
     }
   }
 
@@ -24696,7 +27361,7 @@ DataStep.prototype.isMajor = function() {
 
 module.exports = DataStep;
 
-},{}],90:[function(require,module,exports){
+},{}],101:[function(require,module,exports){
 var Emitter = require('emitter-component');
 var Hammer = require('../module/hammer');
 var util = require('../util');
@@ -24931,7 +27596,7 @@ Graph2d.prototype.getItemRange = function() {
 
 module.exports = Graph2d;
 
-},{"../DataSet":54,"../DataView":55,"../module/hammer":64,"../util":111,"./Core":88,"./Range":91,"./component/CurrentTime":96,"./component/CustomTime":97,"./component/LineGraph":103,"./component/TimeAxis":104,"emitter-component":112}],91:[function(require,module,exports){
+},{"../DataSet":65,"../DataView":66,"../module/hammer":75,"../util":122,"./Core":99,"./Range":102,"./component/CurrentTime":107,"./component/CustomTime":108,"./component/LineGraph":114,"./component/TimeAxis":115,"emitter-component":123}],102:[function(require,module,exports){
 var util = require('../util');
 var hammerUtil = require('../hammerUtil');
 var moment = require('../module/moment');
@@ -24947,8 +27612,8 @@ var Component = require('./component/Component');
  */
 function Range(body, options) {
   var now = moment().hours(0).minutes(0).seconds(0).milliseconds(0);
-  this.start = now.clone().add('days', -3).valueOf(); // Number
-  this.end = now.clone().add('days', 4).valueOf();   // Number
+  this.start = now.clone().add(-3, 'days').valueOf(); // Number
+  this.end = now.clone().add(4, 'days').valueOf();   // Number
 
   this.body = body;
 
@@ -25532,7 +28197,7 @@ Range.prototype.moveTo = function(moveTo) {
 
 module.exports = Range;
 
-},{"../hammerUtil":63,"../module/moment":65,"../util":111,"./component/Component":95}],92:[function(require,module,exports){
+},{"../hammerUtil":74,"../module/moment":76,"../util":122,"./component/Component":106}],103:[function(require,module,exports){
 // Utility functions for ordering and stacking of items
 var EPSILON = 0.001; // used when checking collisions, to prevent round-off errors
 
@@ -25642,7 +28307,7 @@ exports.collision = function(a, b, margin) {
       (a.top + a.height + margin.vertical - EPSILON)   > b.top);
 };
 
-},{}],93:[function(require,module,exports){
+},{}],104:[function(require,module,exports){
 var moment = require('../module/moment');
 
 /**
@@ -26114,7 +28779,7 @@ TimeStep.prototype.getLabelMajor = function(date) {
 
 module.exports = TimeStep;
 
-},{"../module/moment":65}],94:[function(require,module,exports){
+},{"../module/moment":76}],105:[function(require,module,exports){
 var Emitter = require('emitter-component');
 var Hammer = require('../module/hammer');
 var util = require('../util');
@@ -26411,7 +29076,7 @@ Timeline.prototype.getItemRange = function() {
 
 module.exports = Timeline;
 
-},{"../DataSet":54,"../DataView":55,"../module/hammer":64,"../util":111,"./Core":88,"./Range":91,"./component/CurrentTime":96,"./component/CustomTime":97,"./component/ItemSet":101,"./component/TimeAxis":104,"emitter-component":112}],95:[function(require,module,exports){
+},{"../DataSet":65,"../DataView":66,"../module/hammer":75,"../util":122,"./Core":99,"./Range":102,"./component/CurrentTime":107,"./component/CustomTime":108,"./component/ItemSet":112,"./component/TimeAxis":115,"emitter-component":123}],106:[function(require,module,exports){
 /**
  * Prototype for visual components
  * @param {{dom: Object, domProps: Object, emitter: Emitter, range: Range}} [body]
@@ -26467,7 +29132,7 @@ Component.prototype._isResized = function() {
 
 module.exports = Component;
 
-},{}],96:[function(require,module,exports){
+},{}],107:[function(require,module,exports){
 var util = require('../../util');
 var Component = require('./Component');
 var moment = require('../../module/moment');
@@ -26632,7 +29297,7 @@ CurrentTime.prototype.getCurrentTime = function() {
 
 module.exports = CurrentTime;
 
-},{"../../module/moment":65,"../../util":111,"../locales":110,"./Component":95}],97:[function(require,module,exports){
+},{"../../module/moment":76,"../../util":122,"../locales":121,"./Component":106}],108:[function(require,module,exports){
 var Hammer = require('../../module/hammer');
 var util = require('../../util');
 var Component = require('./Component');
@@ -26830,7 +29495,7 @@ CustomTime.prototype._onDragEnd = function (event) {
 
 module.exports = CustomTime;
 
-},{"../../module/hammer":64,"../../module/moment":65,"../../util":111,"../locales":110,"./Component":95}],98:[function(require,module,exports){
+},{"../../module/hammer":75,"../../module/moment":76,"../../util":122,"../locales":121,"./Component":106}],109:[function(require,module,exports){
 var util = require('../../util');
 var DOMutil = require('../../DOMutil');
 var Component = require('./Component');
@@ -27333,7 +29998,7 @@ DataAxis.prototype.snap = function(date) {
 
 module.exports = DataAxis;
 
-},{"../../DOMutil":53,"../../util":111,"../DataStep":89,"./Component":95}],99:[function(require,module,exports){
+},{"../../DOMutil":64,"../../util":122,"../DataStep":100,"./Component":106}],110:[function(require,module,exports){
 var util = require('../../util');
 var DOMutil = require('../../DOMutil');
 
@@ -27470,7 +30135,7 @@ GraphGroup.prototype.getLegend = function(iconWidth, iconHeight) {
 
 module.exports = GraphGroup;
 
-},{"../../DOMutil":53,"../../util":111}],100:[function(require,module,exports){
+},{"../../DOMutil":64,"../../util":122}],111:[function(require,module,exports){
 var util = require('../../util');
 var stack = require('../Stack');
 var RangeItem = require('./item/RangeItem');
@@ -27897,7 +30562,7 @@ Group.prototype._checkIfVisible = function(item, visibleItems, range) {
 
 module.exports = Group;
 
-},{"../../util":111,"../Stack":92,"./item/RangeItem":109}],101:[function(require,module,exports){
+},{"../../util":122,"../Stack":103,"./item/RangeItem":120}],112:[function(require,module,exports){
 var Hammer = require('../../module/hammer');
 var util = require('../../util');
 var DataSet = require('../../DataSet');
@@ -29321,7 +31986,7 @@ ItemSet.itemSetFromTarget = function(event) {
 
 module.exports = ItemSet;
 
-},{"../../DataSet":54,"../../DataView":55,"../../module/hammer":64,"../../util":111,"./Component":95,"./Group":100,"./item/BackgroundItem":105,"./item/BoxItem":106,"./item/PointItem":108,"./item/RangeItem":109}],102:[function(require,module,exports){
+},{"../../DataSet":65,"../../DataView":66,"../../module/hammer":75,"../../util":122,"./Component":106,"./Group":111,"./item/BackgroundItem":116,"./item/BoxItem":117,"./item/PointItem":119,"./item/RangeItem":120}],113:[function(require,module,exports){
 var util = require('../../util');
 var DOMutil = require('../../DOMutil');
 var Component = require('./Component');
@@ -29520,7 +32185,7 @@ Legend.prototype.drawLegendIcons = function() {
 
 module.exports = Legend;
 
-},{"../../DOMutil":53,"../../util":111,"./Component":95}],103:[function(require,module,exports){
+},{"../../DOMutil":64,"../../util":122,"./Component":106}],114:[function(require,module,exports){
 var util = require('../../util');
 var DOMutil = require('../../DOMutil');
 var DataSet = require('../../DataSet');
@@ -30823,7 +33488,7 @@ LineGraph.prototype._linear = function(data) {
 
 module.exports = LineGraph;
 
-},{"../../DOMutil":53,"../../DataSet":54,"../../DataView":55,"../../util":111,"./Component":95,"./DataAxis":98,"./GraphGroup":99,"./Legend":102}],104:[function(require,module,exports){
+},{"../../DOMutil":64,"../../DataSet":65,"../../DataView":66,"../../util":122,"./Component":106,"./DataAxis":109,"./GraphGroup":110,"./Legend":113}],115:[function(require,module,exports){
 var util = require('../../util');
 var Component = require('./Component');
 var TimeStep = require('../TimeStep');
@@ -31233,7 +33898,7 @@ TimeAxis.prototype.snap = function(date) {
 
 module.exports = TimeAxis;
 
-},{"../../module/moment":65,"../../util":111,"../TimeStep":93,"./Component":95}],105:[function(require,module,exports){
+},{"../../module/moment":76,"../../util":122,"../TimeStep":104,"./Component":106}],116:[function(require,module,exports){
 var Hammer = require('../../../module/hammer');
 var Item = require('./Item');
 var RangeItem = require('./RangeItem');
@@ -31377,7 +34042,7 @@ BackgroundItem.prototype.repositionY = function() {
 
 module.exports = BackgroundItem;
 
-},{"../../../module/hammer":64,"./Item":107,"./RangeItem":109}],106:[function(require,module,exports){
+},{"../../../module/hammer":75,"./Item":118,"./RangeItem":120}],117:[function(require,module,exports){
 var Item = require('./Item');
 
 /**
@@ -31601,7 +34266,7 @@ BoxItem.prototype.repositionY = function() {
 
 module.exports = BoxItem;
 
-},{"./Item":107}],107:[function(require,module,exports){
+},{"./Item":118}],118:[function(require,module,exports){
 var Hammer = require('../../../module/hammer');
 
 /**
@@ -31821,7 +34486,7 @@ Item.prototype._updateTitle = function (element) {
 
 module.exports = Item;
 
-},{"../../../module/hammer":64}],108:[function(require,module,exports){
+},{"../../../module/hammer":75}],119:[function(require,module,exports){
 var Item = require('./Item');
 
 /**
@@ -32005,7 +34670,7 @@ PointItem.prototype.repositionY = function() {
 
 module.exports = PointItem;
 
-},{"./Item":107}],109:[function(require,module,exports){
+},{"./Item":118}],120:[function(require,module,exports){
 var Hammer = require('../../../module/hammer');
 var Item = require('./Item');
 
@@ -32299,7 +34964,7 @@ RangeItem.prototype._repaintDragRight = function () {
 
 module.exports = RangeItem;
 
-},{"../../../module/hammer":64,"./Item":107}],110:[function(require,module,exports){
+},{"../../../module/hammer":75,"./Item":118}],121:[function(require,module,exports){
 // English
 exports['en'] = {
   current: 'current',
@@ -32316,7 +34981,7 @@ exports['nl'] = {
 exports['nl_NL'] = exports['nl'];
 exports['nl_BE'] = exports['nl'];
 
-},{}],111:[function(require,module,exports){
+},{}],122:[function(require,module,exports){
 // utility functions
 
 // first check if moment.js is already loaded in the browser window, if so,
@@ -33642,7 +36307,7 @@ exports.easingFunctions = {
     return t < .5 ? 16 * t * t * t * t * t : 1 + 16 * (--t) * t * t * t * t
   }
 };
-},{"./module/moment":65}],112:[function(require,module,exports){
+},{"./module/moment":76}],123:[function(require,module,exports){
 
 /**
  * Expose `Emitter`.
@@ -33808,7 +36473,7 @@ Emitter.prototype.hasListeners = function(event){
   return !! this.listeners(event).length;
 };
 
-},{}],113:[function(require,module,exports){
+},{}],124:[function(require,module,exports){
 /*! Hammer.JS - v1.1.3 - 2014-05-20
  * http://eightmedia.github.io/hammer.js
  *
@@ -35971,7 +38636,7 @@ if(typeof define == 'function' && define.amd) {
 }
 
 })(window);
-},{}],114:[function(require,module,exports){
+},{}],125:[function(require,module,exports){
 (function (global){
 //! moment.js
 //! version : 2.8.3
@@ -38831,7 +41496,7 @@ if(typeof define == 'function' && define.amd) {
 }).call(this);
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],115:[function(require,module,exports){
+},{}],126:[function(require,module,exports){
 /**
  * Copyright 2012 Craig Campbell
  *

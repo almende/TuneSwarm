@@ -4,7 +4,7 @@
   "description": "Web based monitor for events emitted by TuneSwarm agents",
   "repository": "git@github.com:almende/TuneSwarm.git",
   "dependencies": {
-    "evejs": "^0.4.0",
+    "evejs": "^0.4.2",
     "handlebars": "^2.0.0",
     "vis": "^3.4.1"
   },
