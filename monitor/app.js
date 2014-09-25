@@ -8,7 +8,6 @@ var params = new QueryParams();
 
 var CONDUCTOR_AGENT_URL = params.getValue('conductor') || 'ws://localhost:8082/ws/conductor';
 var MONITOR_AGENT_URL = 'monitor';
-var RECONNECT_DELAY = 10000; // ms
 var DELAY = 1000; // ms
 
 window.addEventListener('load', function () {
@@ -125,80 +124,3 @@ window.addEventListener('load', function () {
   window.vis = vis;
   window.params = params;
 });
-
-/**
- * Create a proxy agent and open a websocket for communication with the conductorAgent.
- * TODO: this is redundant as soon as evejs supports websockets
- * @returns {eve.Agent}
- */
-// TODO: cleanup
-function createConductorAgentProxy() {
-  // create a sort of a proxy agent for the conductorAgent
-  // TODO: replace this with a websocket transport as soon as this is implemented in evejs
-  var conductorProxyAgent = new eve.Agent('proxy');
-  conductorProxyAgent.extend('rpc', []);
-  conductorProxyAgent.connect(eve.system.transports.getAll());
-
-  // open a websocket pass incoming messages via the conductorAgent to the monitorAgent
-  function connect() {
-    var ws = new WebSocket(CONDUCTOR_AGENT_URL + '?id=' + MONITOR_AGENT_URL);
-    ws.onopen = function () {
-      console.log('Connected to the conductor agent');
-    };
-    ws.onmessage = function (event) {
-      console.log('received', event.data);
-      var rpc = JSON.parse(event.data);
-      var id = rpc.id;
-      conductorProxyAgent.request('monitor', rpc)
-          .then(function (result) {
-            var response = JSON.stringify({
-              jsonrpc: '2.0',
-              id: id,
-              result: result
-            });
-            console.log('sending', response);
-            ws.send(response);
-          })
-          .catch(function (err) {
-            var response = JSON.stringify({
-              jsonrpc: '2.0',
-              id: id,
-              error: {
-                code: -32000,
-                message: err.message || err.toString()
-              }
-            });
-            console.log('sending', response);
-            ws.send(response);
-            console.log('Error', err);
-          });
-    };
-    ws.onclose = function (err) {
-      console.log('Error: Connection to the conductor agent closed');
-      reconnect();
-    };
-    ws.onerror = function (err) {
-      console.log('Error: Failed to connect to the conductor agent');
-      reconnect();
-    };
-
-    // expose properties on window for debugging purposes
-    window.ws = ws;
-  }
-
-  var reconnectTimer = null;
-  function reconnect() {
-    if (reconnectTimer == null) {
-      console.log('Reconnecting in ' + (RECONNECT_DELAY / 1000) + ' seconds...');
-      reconnectTimer = setTimeout(function () {
-        reconnectTimer = null;
-        connect();
-      }, RECONNECT_DELAY);
-    }
-  }
-
-  // open a web socket to the conductor agent now
-  connect();
-
-  return conductorProxyAgent;
-}
