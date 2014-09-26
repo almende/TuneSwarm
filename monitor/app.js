@@ -9,6 +9,7 @@ var params = new QueryParams();
 var CONDUCTOR_AGENT_URL = params.getValue('conductor') || 'ws://localhost:8082/ws/conductor';
 var MONITOR_AGENT_URL = 'monitor';
 var DELAY = 1000; // ms
+var RECONNECT_DELAY = 10000; // ms
 
 window.addEventListener('load', function () {
   console.log('conductor agent url:', CONDUCTOR_AGENT_URL);
@@ -18,16 +19,23 @@ window.addEventListener('load', function () {
   var monitorAgent = new MonitorAgent(MONITOR_AGENT_URL);
   var conn = monitorAgent.connect(webSocketTransport, 'monitor');
 
+  function connect () {
+    conn.connect(CONDUCTOR_AGENT_URL)
+        .then(function () {
+          console.log('Connected to the conductor agent');
+        })
+        .catch(function (err) {
+          console.log('Error: Failed to connect to the conductor agent');
+          console.log(err);
+
+          // keep trying until the conductor agent is online
+          setTimeout(connect, RECONNECT_DELAY);
+        });
+  }
+
   // connect immediately to the conductor agent (without sending a message),
   // so the conductor agent can send messages to the monitor agent
-  conn.connect(CONDUCTOR_AGENT_URL)
-      .then(function () {
-        console.log('Connected to the conductor agent');
-      })
-      .catch(function (err) {
-        console.log('Error: Failed to connect to the conductor agent');
-        console.log(err)
-      });
+  connect();
 
   // create a timeline
   var container = document.getElementById('timeline-container');

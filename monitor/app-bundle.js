@@ -74,8 +74,8 @@ var params = new QueryParams();
 
 var CONDUCTOR_AGENT_URL = params.getValue('conductor') || 'ws://localhost:8082/ws/conductor';
 var MONITOR_AGENT_URL = 'monitor';
-var RECONNECT_DELAY = 10000; // ms
 var DELAY = 1000; // ms
+var RECONNECT_DELAY = 10000; // ms
 
 window.addEventListener('load', function () {
   console.log('conductor agent url:', CONDUCTOR_AGENT_URL);
@@ -85,16 +85,23 @@ window.addEventListener('load', function () {
   var monitorAgent = new MonitorAgent(MONITOR_AGENT_URL);
   var conn = monitorAgent.connect(webSocketTransport, 'monitor');
 
+  function connect () {
+    conn.connect(CONDUCTOR_AGENT_URL)
+        .then(function () {
+          console.log('Connected to the conductor agent');
+        })
+        .catch(function (err) {
+          console.log('Error: Failed to connect to the conductor agent');
+          console.log(err);
+
+          // keep trying until the conductor agent is online
+          setTimeout(connect, RECONNECT_DELAY);
+        });
+  }
+
   // connect immediately to the conductor agent (without sending a message),
   // so the conductor agent can send messages to the monitor agent
-  conn.connect(CONDUCTOR_AGENT_URL)
-      .then(function () {
-        console.log('Connected to the conductor agent');
-      })
-      .catch(function (err) {
-        console.log('Error: Failed to connect to the conductor agent');
-        console.log(err)
-      });
+  connect();
 
   // create a timeline
   var container = document.getElementById('timeline-container');
@@ -191,82 +198,6 @@ window.addEventListener('load', function () {
   window.vis = vis;
   window.params = params;
 });
-
-/**
- * Create a proxy agent and open a websocket for communication with the conductorAgent.
- * TODO: this is redundant as soon as evejs supports websockets
- * @returns {eve.Agent}
- */
-function createConductorAgentProxy() {
-  // create a sort of a proxy agent for the conductorAgent
-  // TODO: replace this with a websocket transport as soon as this is implemented in evejs
-  var conductorProxyAgent = new eve.Agent('proxy');
-  conductorProxyAgent.extend('rpc', []);
-  conductorProxyAgent.connect(eve.system.transports.getAll());
-
-  // open a websocket pass incoming messages via the conductorAgent to the monitorAgent
-  function connect() {
-    var ws = new WebSocket(CONDUCTOR_AGENT_URL + '?id=' + MONITOR_AGENT_URL);
-    ws.onopen = function () {
-      console.log('Connected to the conductor agent');
-    };
-    ws.onmessage = function (event) {
-      console.log('received', event.data);
-      var rpc = JSON.parse(event.data);
-      var id = rpc.id;
-      conductorProxyAgent.request('monitor', rpc)
-          .then(function (result) {
-            var response = JSON.stringify({
-              jsonrpc: '2.0',
-              id: id,
-              result: result
-            });
-            console.log('sending', response);
-            ws.send(response);
-          })
-          .catch(function (err) {
-            var response = JSON.stringify({
-              jsonrpc: '2.0',
-              id: id,
-              error: {
-                code: -32000,
-                message: err.message || err.toString()
-              }
-            });
-            console.log('sending', response);
-            ws.send(response);
-            console.log('Error', err);
-          });
-    };
-    ws.onclose = function (err) {
-      console.log('Error: Connection to the conductor agent closed');
-      reconnect();
-    };
-    ws.onerror = function (err) {
-      console.log('Error: Failed to connect to the conductor agent');
-      reconnect();
-    };
-
-    // expose properties on window for debugging purposes
-    window.ws = ws;
-  }
-
-  var reconnectTimer = null;
-  function reconnect() {
-    if (reconnectTimer == null) {
-      console.log('Reconnecting in ' + (RECONNECT_DELAY / 1000) + ' seconds...');
-      reconnectTimer = setTimeout(function () {
-        reconnectTimer = null;
-        connect();
-      }, RECONNECT_DELAY);
-    }
-  }
-
-  // open a web socket to the conductor agent now
-  connect();
-
-  return conductorProxyAgent;
-}
 
 },{"./MonitorAgent":1,"./asset/QueryParams":3,"evejs":15,"handlebars":62,"vis":63}],3:[function(require,module,exports){
 /**
@@ -5191,7 +5122,6 @@ var WebSocket = (typeof window !== 'undefined' && typeof window.WebSocket !== 'u
 var util = require('../../util');
 var Connection = require('../Connection');
 
-
 /**
  * A websocket connection.
  * @param {WebSocketTransport} transport
@@ -5207,6 +5137,8 @@ function WebSocketConnection(transport, url, receive) {
   this.receive = receive;
 
   this.sockets = {};
+  this.closed = false;
+  this.reconnectTimers = {};
 
   // ready state
   this.ready = Promise.resolve(this);
@@ -5296,26 +5228,29 @@ WebSocketConnection.prototype.connect = function (to) {
 /**
  * Open a websocket connection
  * @param {String} to   Url of the remote agent
- * @param {function} callback
- * @param {function} errback
+ * @param {function} [callback]
+ * @param {function} [errback]
+ * @param {boolean} [doReconnect=false]
  * @returns {WebSocket}
  * @private
  */
-WebSocketConnection.prototype._connect = function (to, callback, errback) {
+WebSocketConnection.prototype._connect = function (to, callback, errback, doReconnect) {
   var me = this;
-
   var conn = new WebSocket(to + '?id=' + this.url);
 
   // register the new socket
   me.sockets[to] = conn;
 
   conn.onopen = function () {
+    // Change doReconnect to true as soon as we have had an open connection
+    doReconnect = true;
+
     conn.onopen.callbacks.forEach(function (cb) {
       cb(conn);
     });
     conn.onopen.callbacks = [];
   };
-  conn.onopen.callbacks = [callback];
+  conn.onopen.callbacks = callback ? [callback] : [];
 
   conn.onmessage = function (event) {
     me.receive(to, JSON.parse(event.data));
@@ -5323,18 +5258,35 @@ WebSocketConnection.prototype._connect = function (to, callback, errback) {
 
   conn.onclose = function () {
     delete me.sockets[to];
-    //console.log('Connection closed');
-    // TODO: implement auto reconnect
+    if (doReconnect) {
+      me._reconnect(to);
+    }
   };
 
   conn.onerror = function (err) {
     delete me.sockets[to];
-    //console.log('Error: ' + err);
-    // TODO: implement auto reconnect
-    errback(err);
+    if (errback) {
+      errback(err);
+    }
   };
 
   return conn;
+};
+
+/**
+ * Auto reconnect a broken connection
+ * @param {String} to   Url of the remote agent
+ * @private
+ */
+WebSocketConnection.prototype._reconnect = function (to) {
+  var me = this;
+  var doReconnect = true;
+  if (me.closed == false && me.reconnectTimers[to] == null) {
+    me.reconnectTimers[to] = setTimeout(function () {
+      delete me.reconnectTimers[to];
+      me._connect(to, null, null, doReconnect);
+    }, me.transport.reconnectDelay);
+  }
 };
 
 /**
@@ -5386,6 +5338,8 @@ WebSocketConnection.prototype.list = function () {
  * be unregistered from the WebSocketTransport.
  */
 WebSocketConnection.prototype.close = function () {
+  this.closed = true;
+
   // close all connections
   for (var id in this.sockets) {
     if (this.sockets.hasOwnProperty(id)) {
@@ -5422,6 +5376,11 @@ var WebSocketConnection = require('./WebSocketConnection');
  *                                - `localShortcut: boolean`. Optional. If true
  *                                  (default), messages to local agents are not
  *                                  send via WebSocket but delivered immediately
+ *                                - `reconnectDelay: number` Optional. Delay in
+ *                                  milliseconds for reconnecting a broken
+ *                                  connection. 10000 ms by default. Connections
+ *                                  are only automatically reconnected after
+ *                                  there has been an established connection.
  * @constructor
  */
 function WebSocketTransport(config) {
@@ -5429,6 +5388,7 @@ function WebSocketTransport(config) {
   this.networkId = this.id || null;
   this['default'] = config && config['default'] || false;
   this.localShortcut = (config && config.localShortcut === false) ? false : true;
+  this.reconnectDelay = config && config.reconnectDelay || 10000;
 
   this.url = config && config.url || null;
   this.server = null;
