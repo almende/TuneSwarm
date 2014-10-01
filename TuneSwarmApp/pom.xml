@@ -16,7 +16,8 @@
 		<android.version>4.2.2_r2</android.version>
 		<play.version>19.0.0</play.version>
 		<la4j.version>0.4.9</la4j.version>
-		<android-maven-plugin.version>3.9.0-rc.3</android-maven-plugin.version>
+		<android-maven-plugin.version>4.0.0-rc.1</android-maven-plugin.version>
+		<maven-jarsigner-plugin.version>1.3.2</maven-jarsigner-plugin.version>
 		<greenrobot.version>2.0.2</greenrobot.version>
 	</properties>
 
@@ -87,9 +88,6 @@
 					<extractDuplicates>true</extractDuplicates>
 					<attachJar>true</attachJar>
 					<dexForceJumbo>false</dexForceJumbo>
-					<zipalign>
-						<skip>false</skip>
-					</zipalign>
 					<dex>
 						<incremental>true</incremental>
 						<optimize>true</optimize>
@@ -142,6 +140,70 @@
 			</plugins>
 		</pluginManagement>
 	</build>
-
+	<profiles>
+		<profile>
+			<id>sign</id>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-jarsigner-plugin</artifactId>
+						<version>${maven-jarsigner-plugin.version}</version>
+						<executions>
+							<execution>
+								<id>signing</id>
+								<goals>
+									<goal>sign</goal>
+								</goals>
+								<phase>package</phase>
+								<inherited>true</inherited>
+								<configuration>
+									<archiveDirectory></archiveDirectory>
+									<includes>
+										<include>target/*.apk</include>
+									</includes>
+									<keystore>deploy/market.store</keystore>
+									<storepass>{3fP3UpxN0F4HG+wjteoLNYPbtSkvd8hawml1brtw/Hw=}</storepass>
+									<keypass>{3fP3UpxN0F4HG+wjteoLNYPbtSkvd8hawml1brtw/Hw=}</keypass>
+									<alias>appKey</alias>
+									<arguments>
+										<argument>-sigalg</argument>
+										<argument>SHA1withDSA</argument>
+										<argument>-digestalg</argument>
+										<argument>SHA1</argument>
+									</arguments>
+								</configuration>
+							</execution>
+						</executions>
+					</plugin>
+					<plugin>
+						<groupId>com.jayway.maven.plugins.android.generation2</groupId>
+						<artifactId>android-maven-plugin</artifactId>
+						<inherited>true</inherited>
+						<configuration>
+							<sign>
+								<debug>false</debug>
+							</sign>
+							<zipalign>
+								<skip>false</skip>
+							</zipalign>
+							<apkDebug>false</apkDebug>
+							<release>true</release>
+						</configuration>
+						<executions>
+							<execution>
+								<id>zipaligning</id>
+								<goals>
+									<goal>zipalign</goal>
+								</goals>
+								<phase>package</phase>
+								<inherited>true</inherited>
+							</execution>
+						</executions>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
 </project>
 
