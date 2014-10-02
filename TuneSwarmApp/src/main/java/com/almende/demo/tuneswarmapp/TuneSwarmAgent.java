@@ -43,8 +43,10 @@ public class TuneSwarmAgent extends Agent {
 	private static final Logger	LOG					= Logger.getLogger(TuneSwarmAgent.class
 															.getName());
 	private static final String	BASEURL				= "ws://192.168.1.122:8082/ws/";
+	private static boolean      stopped				= false;
 	private URI					cloud				= null;
 	private static Context		ctx					= null;
+	private static EveService	service 			= null;
 	private boolean				playOnShake			= true;
 	private boolean				lightOnly			= true;
 	private boolean				learnLightPrelay	= true;
@@ -103,6 +105,10 @@ public class TuneSwarmAgent extends Agent {
 	}
 
 	public void startLight(@Name("color") String color) {
+		if (stopped){
+			return;
+		}
+		
 		LOG.severe("Starting light:" + color);
 		if (color.equals("Green")) {
 			EventBus.getDefault().post(
@@ -119,6 +125,10 @@ public class TuneSwarmAgent extends Agent {
 	}
 
 	public void startTone() {
+		if (stopped){
+			return;
+		}
+
 		LOG.severe("Starting sound!");
 		player.startSound();
 		playingSince = getScheduler().now();
@@ -223,8 +233,9 @@ public class TuneSwarmAgent extends Agent {
 		}
 	}
 
-	public void init(Context ctx) {
+	public void init(Context ctx, EveService srvs) {
 		TuneSwarmAgent.ctx = ctx;
+		TuneSwarmAgent.service = srvs;
 
 		player = new SoundPlayer(ctx);
 
@@ -288,6 +299,10 @@ public class TuneSwarmAgent extends Agent {
 				LOG.warning("Defaulting to mobile base url!");
 				baseUrl = "ws://192.168.43.59:8082/ws/";
 			}
+			if (ip.startsWith("192.168.150.")) {
+				LOG.warning("Defaulting to laptop base url!");
+				baseUrl = "ws://192.168.150.1:8082/ws/";
+			}
 		}
 
 		System.err.println("Reconnecting to server:" + baseUrl + "conductor");
@@ -335,6 +350,13 @@ public class TuneSwarmAgent extends Agent {
 	public void onEventAsync(final StateEvent event) {
 		if (event.getValue().equals("settingsUpdated")) {
 			reconnect();
+		} else if (event.getValue().equals("stopApp") && service != null){
+			stopped=true;
+			player.stopSound();
+			service.stop();
+		} else if (event.getValue().equals("startApp") && service != null){
+			stopped=false;
+			service.start();
 		}
 	}
 

@@ -72,24 +72,21 @@ public class EveService extends Service {
 		noti.flags |= Notification.FLAG_FOREGROUND_SERVICE;
 		
 		notificationManager.notify(NEWTASKID, noti);
-		
-		mSensorManager.registerListener(shakeSensor, mAccelerometer,
-				SensorManager.SENSOR_DELAY_UI);
-
 	}
 	
+
 	/**
 	 * Inits the eve.
 	 * 
 	 * @param ctx
 	 *            the ctx
 	 */
-	public void initEve(final Context ctx) {
+	public void initEve(final Context ctx, final EveService srvs) {
 		final Handler myHandler = new Handler(myThread.getLooper());
 		myHandler.post(new Runnable() {
 			@Override
 			public void run() {
-				myAgent.init(ctx);
+				myAgent.init(ctx,srvs);
 				setupShakeListener();
 				setupBaseNotification();
 			}
@@ -114,7 +111,19 @@ public class EveService extends Service {
 					}
 
 				});
+				mSensorManager.registerListener(shakeSensor, mAccelerometer,
+						SensorManager.SENSOR_DELAY_UI);
 	}
+	
+	public void stop(){
+		final NotificationManager notificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+		notificationManager.cancel(NEWTASKID);
+		notificationManager.cancelAll();
+	}
+	public void start(){
+		setupBaseNotification();
+	}
+	
 	/**
 	 * Starts the service.
 	 * 
@@ -133,7 +142,7 @@ public class EveService extends Service {
 		if (!myThread.isAlive()) {
 			myThread.start();
 		}
-		initEve(getApplication());
+		initEve(getApplication(),this);
 		
 		return START_STICKY;
 	}

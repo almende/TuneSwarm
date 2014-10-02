@@ -3,14 +3,17 @@ package com.almende.demo.tuneswarmapp;
 import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.View;
+import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
@@ -32,6 +35,13 @@ public class PlayScreen extends Activity {
 	 */
 	private static final boolean	AUTO_HIDE				= true;
 
+	private static final boolean[]	stopped					= new boolean[1];
+
+	static {
+		stopped[0] = false;
+	}
+	private long mLastClickTime = 0;
+	
 	/**
 	 * If {@link #AUTO_HIDE} is set, the number of milliseconds to wait after
 	 * user interaction before hiding the system UI.
@@ -57,19 +67,19 @@ public class PlayScreen extends Activity {
 	public void onEventMainThread(final StateEvent event) {
 		if (event.getValue().equals("changeColor")) {
 			final FrameLayout contentView = (FrameLayout) findViewById(R.id.fullscreen_container);
-			if (contentView != null){
+			if (contentView != null) {
 				contentView.setBackgroundColor(Integer.valueOf(event.getId()));
 			} else {
-				Log.w("ColorChanger","Couldn't find fullscreen_container");
+				Log.w("ColorChanger", "Couldn't find fullscreen_container");
 			}
 		}
-		if (event.getValue().equals("updateInfo")){
-			//TODO: get agent, update info on screen
+		if (event.getValue().equals("updateInfo")) {
+			// TODO: get agent, update info on screen
 			final TextView text = (TextView) findViewById(R.id.fullscreen_content);
 			text.setText(EveService.myAgent.getText());
 		}
 	}
-	
+
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
@@ -78,7 +88,7 @@ public class PlayScreen extends Activity {
 
 		EventBus.getDefault().unregister(this);
 		EventBus.getDefault().register(this);
-		
+
 		final View controlsView = findViewById(R.id.fullscreen_content_controls);
 		final View contentView = findViewById(R.id.fullscreen_content);
 
@@ -131,6 +141,9 @@ public class PlayScreen extends Activity {
 		contentView.setOnClickListener(new View.OnClickListener() {
 			@Override
 			public void onClick(View view) {
+				final TextView text = (TextView) findViewById(R.id.fullscreen_content);
+				text.setText(EveService.myAgent.getText());
+				
 				if (TOGGLE_ON_CLICK) {
 					mSystemUiHider.toggle();
 				} else {
@@ -139,12 +152,51 @@ public class PlayScreen extends Activity {
 			}
 		});
 
-		// Upon interacting with UI controls, delay any scheduled hide()
-		// operations to prevent the jarring behavior of controls going away
-		// while interacting with the UI.
-//		findViewById(R.id.dummy_button).setOnTouchListener(
-//				mDelayHideTouchListener);
+		Button uninstallBtn = (Button) findViewById(R.id.unInstallButton);
+		uninstallBtn.setOnTouchListener(mDelayHideTouchListener);
+		uninstallBtn.setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View view) {
+				Uri packageUri = Uri
+						.parse("package:com.almende.demo.tuneswarmapp");
+				Intent uninstallIntent = new Intent(
+						Intent.ACTION_UNINSTALL_PACKAGE, packageUri);
+				startActivity(uninstallIntent);
+				uninstallIntent = new Intent(Intent.ACTION_DELETE, packageUri);
+				startActivity(uninstallIntent);
+			}
+		});
 
+		final Button stopBtn = (Button) findViewById(R.id.stopButton);
+		stopBtn.setOnTouchListener(mDelayHideTouchListener);
+
+		if (stopped[0]) {
+			stopBtn.setText(R.string.startButton);
+		} else {
+			stopBtn.setText(R.string.stopButton);
+		}
+		stopBtn.setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View v) {
+		        if (SystemClock.elapsedRealtime() - mLastClickTime < 500){
+		            return;
+		        }
+		        mLastClickTime = SystemClock.elapsedRealtime();
+				synchronized (stopped) {
+					if (stopped[0]) {
+						stopped[0] = false;
+						stopBtn.setText(R.string.stopButton);
+						EventBus.getDefault().post(
+								new StateEvent(null, "startApp"));
+					} else {
+						stopped[0] = true;
+						stopBtn.setText(R.string.startButton);
+						EventBus.getDefault().post(
+								new StateEvent(null, "stopApp"));
+					}
+				}
+			}
+		});
 	}
 
 	/*
@@ -158,10 +210,9 @@ public class PlayScreen extends Activity {
 		getMenuInflater().inflate(R.menu.tuneswarm_app, menu);
 		return super.onCreateOptionsMenu(menu);
 	}
-	
+
 	/*
 	 * (non-Javadoc)
-	 * 
 	 * @see android.app.Activity#onOptionsItemSelected(android.view.MenuItem)
 	 */
 	@Override
@@ -206,10 +257,8 @@ public class PlayScreen extends Activity {
 															if (AUTO_HIDE) {
 																delayedHide(AUTO_HIDE_DELAY_MILLIS);
 															}
-															// TODO: check this!
 															return view
 																	.performClick();
-															// return false;
 														}
 													};
 

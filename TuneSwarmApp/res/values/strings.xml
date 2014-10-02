@@ -10,4 +10,7 @@
     <string name="wsServer">Server base-url</string>
     <string name="pref_connection_title">Connection</string>
     <string name="pref_app_title">Information</string>
+    <string name="stopButton">Stop App</string>
+    <string name="startButton">Start App</string>
+    <string name="uninstall">Uninstall App</string>
 </resources>
