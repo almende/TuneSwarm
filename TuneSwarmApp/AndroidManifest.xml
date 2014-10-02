@@ -5,7 +5,7 @@
     android:versionName="2.0" >
 
     <uses-sdk
-        android:minSdkVersion="16"
+        android:minSdkVersion="14"
         android:targetSdkVersion="21" />
 
     <uses-feature
@@ -17,6 +17,7 @@
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.GET_ACCOUNTS" />
 
     <application
         android:name=".TuneSwarmApp"
@@ -42,6 +43,10 @@
             android:configChanges="orientation|keyboardHidden|screenSize"
             android:label="@string/title_settings"
             android:parentActivityName="com.almende.demo.tuneswarmapp.TuneSwarmApp" >
+             <!-- Parent activity meta-data to support API level 4+ -->
+    		<meta-data
+        		android:name="android.support.PARENT_ACTIVITY"
+        		android:value="com.almende.demo.tuneswarmapp.TuneSwarmApp" />
         </activity>
 
         <service

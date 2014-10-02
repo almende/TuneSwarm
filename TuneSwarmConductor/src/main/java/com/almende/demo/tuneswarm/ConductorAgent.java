@@ -29,9 +29,11 @@ import com.almende.eve.transform.rpc.annotation.Access;
 import com.almende.eve.transform.rpc.annotation.AccessType;
 import com.almende.eve.transform.rpc.annotation.Name;
 import com.almende.eve.transform.rpc.annotation.Namespace;
+import com.almende.eve.transform.rpc.annotation.Optional;
 import com.almende.eve.transform.rpc.annotation.Sender;
 import com.almende.eve.transport.http.HttpTransportConfig;
 import com.almende.eve.transport.ws.WebsocketTransportConfig;
+import com.almende.util.callback.AsyncCallback;
 import com.almende.util.jackson.JOM;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -49,6 +51,26 @@ public class ConductorAgent extends Agent {
 	private static final URI						monitor		= URI.create("wsclient:monitor");
 
 	/**
+	 * Gets the agents.
+	 *
+	 * @return the agents
+	 */
+	public ArrayList<ToneAgent> getAgents(){
+		return new ArrayList<ToneAgent>(agents2.values());
+	}
+	
+	/**
+	 * On agents change.
+	 */
+	public void onAgentsChange(){
+		try {
+			caller.call(monitor, "onAgentsChange", JOM.createObjectNode());
+		} catch (IOException e) {
+			LOG.warning("Monitor not available?");
+		}
+	}
+	
+	/**
 	 * On note.
 	 *
 	 * @param event
@@ -56,7 +78,8 @@ public class ConductorAgent extends Agent {
 	 * @param senderUrl
 	 *            the sender url
 	 */
-	public void onNote(@Name("toneEvent") ToneEvent event, @Sender String senderUrl) {
+	public void onNote(@Name("toneEvent") ToneEvent event,
+			@Sender String senderUrl) {
 		final ObjectNode params = JOM.createObjectNode();
 		params.put("start", new DateTime(event.getTimestamp()).toString());
 		params.put("duration", event.getDuration());
@@ -72,15 +95,41 @@ public class ConductorAgent extends Agent {
 			LOG.warning("Monitor not available?");
 		}
 	}
-	
-	
 
 	/**
 	 * The Class ToneAgent.
 	 */
 	class ToneAgent {
-		URI		address;
-		Tone	tone;
+		URI					address;
+		Tone				tone;
+		String				name;
+		boolean	offline;
+		public ToneAgent(){}
+		public URI getAddress() {
+			return address;
+		}
+		public void setAddress(URI address) {
+			this.address = address;
+		}
+		public Tone getTone() {
+			return tone;
+		}
+		public void setTone(Tone tone) {
+			this.tone = tone;
+		}
+		public String getName() {
+			return name;
+		}
+		public void setName(String name) {
+			this.name = name;
+		}
+		public boolean isOffline() {
+			return offline;
+		}
+		public void setOffline(boolean offline) {
+			this.offline = offline;
+		}
+		
 	}
 
 	private Tone getTone() {
@@ -172,6 +221,9 @@ public class ConductorAgent extends Agent {
 		final SyncScheduler scheduler = (SyncScheduler) getScheduler();
 		scheduler.setCaller(caller);
 		LOG.warning("Started Conductor at:" + host);
+
+		schedule("pingAgents", JOM.createObjectNode(),
+				DateTime.now().plus(10000));
 	}
 
 	/**
@@ -199,27 +251,32 @@ public class ConductorAgent extends Agent {
 	 *
 	 * @param senderUrl
 	 *            the sender url
+	 * @param name
+	 *            the name
 	 * @return the double
 	 */
-	public double registerAgent(@Sender String senderUrl) {
+	public double registerAgent(final @Sender String senderUrl,
+			final @Optional @Name("name") String name) {
 		final URI address = URI.create(senderUrl);
 		if (agents2.containsKey(address)) {
 			final Tone tone = agents2.get(address).tone;
-			LOG.warning("Re-registering:" + senderUrl + " was already tone:"
-					+ tone);
+			LOG.warning("Re-registering:" + senderUrl + "(" + name + ")"
+					+ " was already tone:" + tone);
 			return tone.getFrequency();
 		}
 		// New agent
 		ToneAgent agent = new ToneAgent();
 		agent.address = URI.create(senderUrl);
 		agent.tone = getTone();
+		agent.name = name;
 		synchronized (agents) {
 			List<ToneAgent> value = agents.get(agent.tone);
 			value.add(agent);
 			agents.put(agent.tone, value);
 		}
 		agents2.put(address, agent);
-		LOG.warning("Registering:" + senderUrl + " will be tone:" + agent.tone);
+		LOG.warning("Registering:" + senderUrl + "(" + name + ")"
+				+ " will be tone:" + agent.tone);
 		return agent.tone.getFrequency();
 	}
 
@@ -267,6 +324,9 @@ public class ConductorAgent extends Agent {
 		}
 		for (Entry<Tone, TuneDescription> item : plan.entrySet()) {
 			for (final ToneAgent agent : agents.get(item.getKey())) {
+				if (agent.offline) {
+					continue;
+				}
 				final ObjectNode params = JOM.createObjectNode();
 				params.set("description",
 						JOM.getInstance().valueToTree(item.getValue()));
@@ -292,6 +352,9 @@ public class ConductorAgent extends Agent {
 		final Long startTime = getScheduler().now() + delay;
 		for (final List<ToneAgent> list : agents.values()) {
 			for (final ToneAgent agent : list) {
+				if (agent.offline) {
+					continue;
+				}
 				final ObjectNode params = JOM.createObjectNode();
 				params.put("id", id);
 				params.put("timestamp", startTime);
@@ -316,9 +379,42 @@ public class ConductorAgent extends Agent {
 		params.set("config", config);
 		for (final List<ToneAgent> list : agents.values()) {
 			for (final ToneAgent agent : list) {
+				if (agent.offline) {
+					continue;
+				}
 				caller.call(agent.address, "configure", params);
 			}
 		}
+	}
+
+	/**
+	 * Ping agents.
+	 */
+	public void pingAgents() {
+		for (final ToneAgent agent : agents2.values()) {
+			try {
+				caller.call(agent.address, "ping", null,
+						new AsyncCallback<Long>() {
+
+							@Override
+							public void onSuccess(Long result) {
+								// GOOD, nothing to do!
+								agent.offline = false;
+							}
+
+							@Override
+							public void onFailure(Exception exception) {
+								// Oops, disable agent in list
+								agent.offline = true;
+							}
+						});
+			} catch (IOException e) {
+				agent.offline = true;
+			}
+		}
+
+		schedule("pingAgents", JOM.createObjectNode(),
+				DateTime.now().plus(10000));
 	}
 
 	/**
