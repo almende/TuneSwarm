@@ -71,6 +71,14 @@ public class ConductorAgent extends Agent {
 	}
 	
 	/**
+	 * Do agents change.
+	 */
+	public void doAgentsChange(){
+		onAgentsChange();
+		schedule("doAgentsChange",JOM.createObjectNode(),DateTime.now().plus(5000));
+	}
+	
+	/**
 	 * On note.
 	 *
 	 * @param event
@@ -224,6 +232,8 @@ public class ConductorAgent extends Agent {
 
 		schedule("pingAgents", JOM.createObjectNode(),
 				DateTime.now().plus(10000));
+		
+		schedule("doAgentsChange",JOM.createObjectNode(),DateTime.now().plus(5000));
 	}
 
 	/**
