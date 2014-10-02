@@ -13,9 +13,10 @@ function MonitorAgent(id) {
   eve.Agent.call(this, id);
 
   this.notes = new DataSet();
+  this.agents = new DataSet();
 
   // extend the agent with rpc functionality
-  this.extend('rpc', ['onNote']);
+  this.extend('rpc', ['onNote', 'onAgentsChange']);
 
   // connect to all transports provided by the system
   this.connect(eve.system.transports.getAll());
@@ -45,6 +46,26 @@ MonitorAgent.prototype.onNote = function(data) {
   }
 
   return 'Thank you very much';
+};
+
+MonitorAgent.prototype.onAgentsChange = function(params, sender) {
+  console.log('onAgentsChange triggered');
+  var me = this;
+  this.request(sender, {method: 'getAgents', params: {}})
+      .then(function (agents) {
+        console.log('agents', agents);
+
+        agents.sort(function (a, b) {
+          return a.name > b.name;
+        });
+
+        // TODO: this is not so efficient
+        me.agents.clear();
+        me.agents.add(agents);
+      })
+      .catch(function (err) {
+        console.log('Error', err);
+      })
 };
 
 // enum all used notes

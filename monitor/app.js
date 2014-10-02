@@ -23,6 +23,9 @@ window.addEventListener('load', function () {
     conn.connect(CONDUCTOR_AGENT_URL)
         .then(function () {
           console.log('Connected to the conductor agent');
+
+          // fake an onAgentsChange event to force an immediate update of the list of agents
+          monitorAgent.onAgentsChange({}, CONDUCTOR_AGENT_URL);
         })
         .catch(function (err) {
           console.log('Error: Failed to connect to the conductor agent');
@@ -50,6 +53,29 @@ window.addEventListener('load', function () {
     showMajorLabels: false
   };
   var timeline = new vis.Timeline(container, monitorAgent.notes, options);
+
+  // create a table displaying the status of all connected agents
+  monitorAgent.agents.on('*', function () {
+    var agents = monitorAgent.agents.get();
+
+    // TODO: this is not safe against xss attacks...
+    document.getElementById('agents-container').innerHTML = '<table class="agents">' +
+        '<tr>' +
+        '<th>name</th>' +
+        '<th>tone</th>' +
+        '<th>address</th>' +
+        '<th>online</th>' +
+        '</tr>' +
+        agents.map(function (agent) {
+          return '<tr>' +
+              '<td>' + agent.name + '</td>' +
+              '<td>' + agent.tone + '</td>' +
+              '<td>' + agent.address + '</td>' +
+              '<td>' + !agent.offline + '</td>' +
+              '</tr>'
+        }).join('') +
+        '</table>';
+  });
 
   var running = false;
   function renderStep() {
@@ -109,6 +135,10 @@ window.addEventListener('load', function () {
     if (!running) {
       renderStep();
     }
+  };
+  document.getElementById('showMusic').onclick = function () {
+    this.style.display = 'none';
+    document.getElementById('music').style.display = 'block';
   };
 
   // emit a random note once a second

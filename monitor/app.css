@@ -1,7 +1,7 @@
 @import url('node_modules/vis/dist/vis.css');
 
-html, body {
-  font: 11pt verdana;
+html, body, input, select {
+  font: 18pt verdana;
 }
 
 .vis.timeline.root {
@@ -20,6 +20,10 @@ html, body {
 
 .vis.timeline .timeaxis .grid.minor {
   border: transparent;
+}
+
+#music {
+  display: none;
 }
 
 #timeline-container {
@@ -44,4 +48,25 @@ div.note-container {
 
 div.note-container img.note {
   position: relative;
+}
+
+table.agents {
+  border-collapse: collapse;
+}
+
+table.agents tr:nth-child(even) {
+  background: #f5f5f5;
+}
+
+table.agents th,
+table.agents td {
+  text-align: left;
+  border: 1px solid #e5e5e5;
+  padding: 2px 10px;
+  max-width: 700px;
+  overflow: auto;
+}
+
+table.agents th {
+  background: #e5e5e5;
 }
