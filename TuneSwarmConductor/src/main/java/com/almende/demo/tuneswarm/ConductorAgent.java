@@ -55,29 +55,21 @@ public class ConductorAgent extends Agent {
 	 *
 	 * @return the agents
 	 */
-	public ArrayList<ToneAgent> getAgents(){
+	public ArrayList<ToneAgent> getAgents() {
 		return new ArrayList<ToneAgent>(agents2.values());
 	}
-	
+
 	/**
 	 * On agents change.
 	 */
-	public void onAgentsChange(){
+	public void onAgentsChange() {
 		try {
 			caller.call(monitor, "onAgentsChange", JOM.createObjectNode());
 		} catch (IOException e) {
 			LOG.warning("Monitor not available?");
 		}
 	}
-	
-	/**
-	 * Do agents change.
-	 */
-	public void doAgentsChange(){
-		onAgentsChange();
-		schedule("doAgentsChange",JOM.createObjectNode(),DateTime.now().plus(5000));
-	}
-	
+
 	/**
 	 * On note.
 	 *
@@ -108,36 +100,45 @@ public class ConductorAgent extends Agent {
 	 * The Class ToneAgent.
 	 */
 	class ToneAgent {
-		URI					address;
-		Tone				tone;
-		String				name;
+		URI		address;
+		Tone	tone;
+		String	name;
 		boolean	offline;
-		public ToneAgent(){}
+
+		public ToneAgent() {}
+
 		public URI getAddress() {
 			return address;
 		}
+
 		public void setAddress(URI address) {
 			this.address = address;
 		}
+
 		public Tone getTone() {
 			return tone;
 		}
+
 		public void setTone(Tone tone) {
 			this.tone = tone;
 		}
+
 		public String getName() {
 			return name;
 		}
+
 		public void setName(String name) {
 			this.name = name;
 		}
+
 		public boolean isOffline() {
 			return offline;
 		}
+
 		public void setOffline(boolean offline) {
 			this.offline = offline;
 		}
-		
+
 	}
 
 	private Tone getTone() {
@@ -232,8 +233,6 @@ public class ConductorAgent extends Agent {
 
 		schedule("pingAgents", JOM.createObjectNode(),
 				DateTime.now().plus(10000));
-		
-		schedule("doAgentsChange",JOM.createObjectNode(),DateTime.now().plus(5000));
 	}
 
 	/**
@@ -269,9 +268,12 @@ public class ConductorAgent extends Agent {
 			final @Optional @Name("name") String name) {
 		final URI address = URI.create(senderUrl);
 		if (agents2.containsKey(address)) {
-			final Tone tone = agents2.get(address).tone;
+			final ToneAgent agent = agents2.get(address);
+			final Tone tone = agent.tone;
+			agent.offline = false;
 			LOG.warning("Re-registering:" + senderUrl + "(" + name + ")"
 					+ " was already tone:" + tone);
+			onAgentsChange();
 			return tone.getFrequency();
 		}
 		// New agent
@@ -279,6 +281,7 @@ public class ConductorAgent extends Agent {
 		agent.address = URI.create(senderUrl);
 		agent.tone = getTone();
 		agent.name = name;
+		agent.offline = false;
 		synchronized (agents) {
 			List<ToneAgent> value = agents.get(agent.tone);
 			value.add(agent);
@@ -287,6 +290,7 @@ public class ConductorAgent extends Agent {
 		agents2.put(address, agent);
 		LOG.warning("Registering:" + senderUrl + "(" + name + ")"
 				+ " will be tone:" + agent.tone);
+		onAgentsChange();
 		return agent.tone.getFrequency();
 	}
 
@@ -422,7 +426,7 @@ public class ConductorAgent extends Agent {
 				agent.offline = true;
 			}
 		}
-
+		onAgentsChange();
 		schedule("pingAgents", JOM.createObjectNode(),
 				DateTime.now().plus(10000));
 	}

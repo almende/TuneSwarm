@@ -51,7 +51,7 @@ public class TuneSwarmAgent extends Agent {
 	private URI					cloud				= null;
 	private static Context		ctx					= null;
 	private static EveService	service 			= null;
-	private boolean				playOnShake			= true;
+	private boolean				playOnShake			= false;
 	private boolean				lightOnly			= true;
 	private boolean				learnLightPrelay	= true;
 	private boolean				sendNoteEvents		= true;
