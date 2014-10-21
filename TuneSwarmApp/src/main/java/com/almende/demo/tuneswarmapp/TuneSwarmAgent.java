@@ -262,7 +262,7 @@ public class TuneSwarmAgent extends Agent {
 		SyncSchedulerConfig schedulerConfig = new SyncSchedulerConfig();
 		config.setScheduler(schedulerConfig);
 
-		setConfig(config, true);
+		loadConfig(config);
 		EventBus.getDefault().post(new StateEvent(null, "updateInfo"));
 
 		schedule("reconnect", JOM.createObjectNode(), DateTime.now());
@@ -333,7 +333,8 @@ public class TuneSwarmAgent extends Agent {
 		final WebsocketTransportConfig clientConfig = new WebsocketTransportConfig();
 		clientConfig.setServerUrl(baseUrl + "conductor");
 		clientConfig.setId(getId());
-		this.loadTransports(clientConfig, true);
+		this.loadTransports(clientConfig);
+		onBoot();
 
 		cloud = URI.create(baseUrl + "conductor");
 
